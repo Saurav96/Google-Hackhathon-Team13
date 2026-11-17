@@ -27,7 +27,7 @@ export function listen({ onInterim, onFinal, onEnd }) {
 }
 
 // Reads only the opening sentences, with tables and markdown marks removed.
-export function speak(markdown) {
+export function speak(markdown, onEnd) {
   if (!canSpeak) return;
   window.speechSynthesis.cancel();
   const plain = markdown
@@ -38,7 +38,10 @@ export function speak(markdown) {
     .replace(/\s+/g, " ")
     .trim();
   const sentences = plain.match(/[^.!?]+[.!?]+/g) || [plain];
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(sentences.slice(0, 3).join(" ")));
+  const utterance = new SpeechSynthesisUtterance(sentences.slice(0, 6).join(" "));
+  utterance.onend = () => onEnd?.();
+  utterance.onerror = () => onEnd?.();
+  window.speechSynthesis.speak(utterance);
 }
 
 export const stopSpeaking = () => canSpeak && window.speechSynthesis.cancel();

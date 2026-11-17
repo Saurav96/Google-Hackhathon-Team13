@@ -3,6 +3,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { getJson, roleOf, usd } from "./api.js";
 import Chat from "./Chat.jsx";
 import { CaseDetails, ClosureDetails, Evidence } from "./Details.jsx";
+import Icon from "./Icons.jsx";
 import Info from "./Info.jsx";
 import MapView from "./MapView.jsx";
 
@@ -47,6 +48,7 @@ export default function App() {
   const [reach, setReach] = useState(() => new Map());
   const [outbox, setOutbox] = useState(null);
   const latest = useRef(null);
+  const cascades = useRef(new Map());
   const wide = useWide();
   const [theme, toggleTheme] = useTheme();
 
@@ -61,6 +63,11 @@ export default function App() {
         // A link can open the desk on one business: /?select=<business_id>
         const linked = new URLSearchParams(location.search).get("select");
         if (linked) select(linked, { toggle: false });
+        // Warm the queue's cascades in the background so a click shows its result at once.
+        ov.applicants.forEach((a) => {
+          getJson(`/api/cascade/${encodeURIComponent(a.business_id)}?hops=2`)
+            .then((c) => cascades.current.set(`${a.business_id}:2`, c)).catch(() => {});
+        });
       })
       .catch((error) => setProblem(`The corridor data did not load. ${error.message} Reload the page to try again.`));
   }, []);
@@ -82,8 +89,11 @@ export default function App() {
     }
     latest.current = id;
     setSelected(id); setClosure(null); setMode("queue");
+    const key = `${id}:${hops}`;
+    if (cascades.current.has(key)) return setCascade(cascades.current.get(key));
     try {
       const c = await getJson(`/api/cascade/${encodeURIComponent(id)}?hops=${hops}`);
+      cascades.current.set(key, c);
       if (latest.current === id) setCascade(c);
     } catch (error) {
       setProblem(error.message);
@@ -143,16 +153,24 @@ export default function App() {
   const committed = [...funded].reduce((sum, id) => sum + (byId.get(id)?.requested_usd || 0), 0);
 
   const view = useMemo(() => {
+    // Mark the clicked business at once, before its cascade has arrived.
+    if (selected && mode === "queue" && cascade?.seed.business_id !== selected) {
+      return { kind: "cascade", seed: selected, exposed: [], links: [] };
+    }
     if (cascade) return { kind: "cascade", seed: cascade.seed.business_id, exposed: cascade.exposed, links: cascade.links };
     if (closure?.map) return { kind: "closure", first: closure.map.first_order, second: closure.map.second_order, links: closure.map.links };
     return null;
-  }, [cascade, closure]);
+  }, [cascade, closure, selected, mode]);
 
   if (problem && !overview) return <p className="fatal">{problem}</p>;
   if (!overview) return <p className="fatal">Loading the corridor.</p>;
 
   const planOrder = new Map((plan?.plan || []).map((s) => [s.business_id, s.step]));
-  const headline = cascade
+  const pendingName = selected && mode === "queue" && cascade?.seed.business_id !== selected
+    ? nodes.find((n) => n.id === selected)?.name : null;
+  const headline = pendingName
+    ? <>Tracing what depends on <b>{pendingName}</b></>
+    : cascade
     ? (cascade.exposed_total
       ? <><b>{cascade.seed.name}</b> closes. {cascade.exposed_total} businesses lose a supplier.</>
       : <><b>{cascade.seed.name}</b> closes. No other business here buys from it.</>)
@@ -273,7 +291,9 @@ export default function App() {
         <h1>Central Market relief desk</h1>
         <p>See what each grant protects before you spend it</p>
         <div className="bar-tools">
-          <button type="button" onClick={toggleTheme}>{theme === "dark" ? "Light mode" : "Dark mode"}</button>
+          <button type="button" onClick={toggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+            <Icon name={theme === "dark" ? "sun" : "moon"} />{theme === "dark" ? "Light" : "Dark"}
+          </button>
         </div>
       </header>
       {wide ? (

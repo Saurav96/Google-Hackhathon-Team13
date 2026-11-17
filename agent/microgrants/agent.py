@@ -176,7 +176,9 @@ root_agent = Agent(
     instruction=INSTRUCTION,
     generate_content_config=types.GenerateContentConfig(
         temperature=0.2,
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
+        thinking_config=types.ThinkingConfig(
+            thinking_level=types.ThinkingLevel[os.environ.get("AGENT_THINKING", "LOW")]
+        ),
     ),
     tools=[
         find_business,

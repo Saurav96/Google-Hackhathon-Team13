@@ -2,6 +2,8 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useEffect, useRef, useState } from "react";
 import { ask, saveFile, splitFollowUps } from "./advisor.js";
+import { Activity, History } from "./ChatPanels.jsx";
+import Icon from "./Icons.jsx";
 import { useChats } from "./sessions.js";
 import { canListen, canSpeak, listen, speak, stopSpeaking } from "./voice.js";
 
@@ -13,10 +15,11 @@ const STARTERS = [
 ];
 const ACCEPT = "image/*,application/pdf,text/plain,text/csv,.md";
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
+const seconds = (ms) => `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
 
 function printMemo(html) {
   const frame = window.open("", "_blank", "width=820,height=900");
-  if (!frame) return;
+  if (!frame) return false;
   frame.document.write(`<title>Grant memo</title><style>
     body{font:16px/1.6 Georgia,serif;max-width:720px;margin:40px auto;color:#111}
     table{border-collapse:collapse;font:13px sans-serif}td,th{border:1px solid #bbb;padding:4px 8px;text-align:left}
@@ -26,85 +29,73 @@ function printMemo(html) {
     Date: ${new Date().toLocaleDateString("en-US", { dateStyle: "long" })}</p>${html}`);
   frame.document.close();
   frame.print();
+  return true;
 }
 
-function Answer({ message, onAsk, isLast }) {
+function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity, notify }) {
   const { body, followUps } = splitFollowUps(message.text || "");
   const html = DOMPurify.sanitize(marked.parse(body));
-  const [open, setOpen] = useState(false);
   const running = message.status === "running";
   const steps = message.steps.map((s) => (typeof s === "string" ? { label: s } : s));
+  const [elapsed, setElapsed] = useState(0);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(() => setElapsed(Date.now() - message.startedAt), 500);
+    return () => clearInterval(timer);
+  }, [running, message.startedAt]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+      notify("Copied to clipboard");
+    } catch {
+      notify("Could not copy. Select the text and copy it by hand.");
+    }
+  }
+
   return (
     <div className="msg msg-agent">
-      {steps.length > 0 && (
-        <div className="steps">
-          <button type="button" className="steps-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
-            {running ? steps[steps.length - 1].label : `Used ${steps.length} tool${steps.length > 1 ? "s" : ""}`}
-            <span aria-hidden="true">{open ? " ▾" : " ▸"}</span>
-          </button>
-          {open && (
-            <ol>
-              {steps.map((s, i) => (
-                <li key={i}>
-                  {s.label}
-                  {s.tool && <code>{s.tool}({s.args})</code>}
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
+      {running && (
+        <p className="status" aria-live="polite">
+          <span className="pulse" aria-hidden="true" />
+          {steps.length ? steps[steps.length - 1].label : "Reading your question"}
+          {elapsed > 3000 && <small>{seconds(elapsed)}</small>}
+        </p>
       )}
-      {body
-        ? <div className="prose" dangerouslySetInnerHTML={{ __html: html }} />
-        : running && <p className="thinking">Working on it</p>}
-      {message.error && <p className="error">{message.error}</p>}
+      {body && <div className="prose" dangerouslySetInnerHTML={{ __html: html }} />}
+      {message.status === "stopped" && <p className="sub">You stopped this answer.</p>}
+      {message.error && (
+        <p className="error">
+          {message.error} <button type="button" className="link" onClick={onRetry}><Icon name="retry" size={13} /> Try again</button>
+        </p>
+      )}
       {message.status === "done" && isLast && followUps.length > 0 && (
         <div className="follow-ups">
           {followUps.map((q) => <button type="button" key={q} onClick={() => onAsk(q)}>{q}</button>)}
         </div>
       )}
-      {message.status === "done" && body && (
+      {!running && body && (
         <div className="msg-actions">
-          <button type="button" onClick={() => navigator.clipboard?.writeText(body)}>Copy</button>
-          <button type="button" onClick={() => printMemo(html)}>Print as memo</button>
-          {canSpeak && <button type="button" onClick={() => speak(body)}>Read aloud</button>}
+          <button type="button" onClick={copy} title="Copy" aria-label="Copy"><Icon name={copied ? "check" : "copy"} /></button>
+          <button type="button" title="Print as memo" aria-label="Print as memo"
+            onClick={() => printMemo(html) || notify("Allow pop ups for this site to print.")}><Icon name="print" /></button>
+          {canSpeak && (
+            <button type="button" className={speaking ? "is-on" : ""} onClick={onSpeak} aria-pressed={speaking}
+              title={speaking ? "Stop reading" : "Read aloud"} aria-label={speaking ? "Stop reading" : "Read aloud"}>
+              <Icon name={speaking ? "stop" : "speak"} />{speaking && <span>Stop</span>}
+            </button>
+          )}
+          {message.ms > 0 && (
+            <button type="button" className="meta" onClick={onActivity} title="See how this was answered">
+              {seconds(message.ms)}{steps.length > 0 && `, ${steps.length} tool${steps.length > 1 ? "s" : ""}`}
+            </button>
+          )}
         </div>
       )}
-    </div>
-  );
-}
-
-function History({ chats, activeId, onOpen, onRename, onRemove, onClose }) {
-  const [editing, setEditing] = useState(null);
-  const [confirming, setConfirming] = useState(null);
-  return (
-    <div className="history" role="dialog" aria-label="Past chats">
-      <div className="history-head"><strong>Your chats</strong><button type="button" onClick={onClose}>Close</button></div>
-      <ul>
-        {[...chats].sort((a, b) => b.updatedAt - a.updatedAt).map((chat) => (
-          <li key={chat.id} className={chat.id === activeId ? "is-on" : ""}>
-            {editing === chat.id ? (
-              <form onSubmit={(e) => { e.preventDefault(); onRename(chat.id, e.target.elements.title.value); setEditing(null); }}>
-                <input name="title" defaultValue={chat.title} autoFocus aria-label="Chat name" onBlur={() => setEditing(null)} />
-              </form>
-            ) : (
-              <button type="button" className="history-open" onClick={() => { onOpen(chat.id); onClose(); }}>
-                <span>{chat.title}</span>
-                <small>{chat.messages.length ? `${Math.ceil(chat.messages.length / 2)} question${chat.messages.length > 2 ? "s" : ""}` : "Empty"}</small>
-              </button>
-            )}
-            {confirming === chat.id ? (
-              <button type="button" className="history-act is-danger" onClick={() => { onRemove(chat.id); setConfirming(null); }}>Delete it</button>
-            ) : (
-              <>
-                <button type="button" className="history-act" onClick={() => setEditing(chat.id)}>Rename</button>
-                <button type="button" className="history-act" onClick={() => setConfirming(chat.id)}>Delete</button>
-              </>
-            )}
-          </li>
-        ))}
-      </ul>
-      <p className="sub">Chats are saved in this browser. Each one keeps its own context with the advisor.</p>
     </div>
   );
 }
@@ -112,36 +103,68 @@ function History({ chats, activeId, onOpen, onRename, onRemove, onClose }) {
 export default function Chat({ onTool, selectedName, outbox }) {
   const { chats, active, open, start, rename, remove, update } = useChats();
   const messages = active.messages;
-  const [showHistory, setShowHistory] = useState(false);
+  const [overlay, setOverlay] = useState(null);
   const [text, setText] = useState("");
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [speakingId, setSpeakingId] = useState(null);
+  const [toast, setToast] = useState("");
   const scroller = useRef(null);
   const fileInput = useRef(null);
   const stopListening = useRef(null);
+  const aborter = useRef(null);
+  const pinned = useRef(true);
 
+  // Follow new text only while the reader is already at the bottom.
   useEffect(() => {
+    if (pinned.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+  }, [messages]);
+  useEffect(() => {
+    pinned.current = true;
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
-  }, [messages, active.id]);
+    stopSpeaking();
+    setSpeakingId(null);
+  }, [active.id]);
 
-  // Questions sent from elsewhere on the screen, such as the map card.
   useEffect(() => {
     if (outbox?.question) send(outbox.question);
   }, [outbox]);
 
-  async function send(question, spoken = false) {
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(""), 2200);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") setOverlay(null); };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); stopSpeaking(); };
+  }, []);
+
+  function toggleSpeak(message) {
+    if (speakingId === message.id) {
+      stopSpeaking();
+      return setSpeakingId(null);
+    }
+    setSpeakingId(message.id);
+    speak(splitFollowUps(message.text).body, () => setSpeakingId((id) => (id === message.id ? null : id)));
+  }
+
+  async function send(question, { spoken = false, attached = files } = {}) {
     const q = question.trim();
     if (!q || busy) return;
-    const attached = files;
     setBusy(true);
     setText("");
     setFiles([]);
-    setNotice("");
+    setOverlay(null);
     stopSpeaking();
+    setSpeakingId(null);
+    pinned.current = true;
     const id = Date.now();
     const chatId = active.id;
+    const startedAt = Date.now();
     const patch = (change) => update(chatId, (c) => ({
       messages: c.messages.map((m) => (m.id === id ? { ...m, ...change(m) } : m)),
     }));
@@ -150,9 +173,10 @@ export default function Chat({ onTool, selectedName, outbox }) {
       messages: [
         ...c.messages,
         { id: id - 1, role: "user", text: q, files: attached.map((f) => ({ name: f.name })) },
-        { id, role: "agent", text: "", steps: [], status: "running" },
+        { id, role: "agent", question: q, text: "", steps: [], status: "running", startedAt },
       ],
     }));
+    aborter.current = new AbortController();
     try {
       if (attached.length) {
         const saved = await Promise.all(attached.map(saveFile));
@@ -163,14 +187,22 @@ export default function Chat({ onTool, selectedName, outbox }) {
       const answer = await ask(q, {
         sessionId: chatId,
         files: attached,
-        onStep: (label) => patch((m) => ({ steps: [...m.steps, label] })),
+        signal: aborter.current.signal,
+        onStep: (step) => patch((m) => ({ steps: [...m.steps, { ...step, at: Date.now() - startedAt }] })),
+        onStepDone: (callId) => patch((m) => ({
+          steps: m.steps.map((s) => (s.id === callId && s.ms == null ? { ...s, ms: Date.now() - startedAt - s.at } : s)),
+        })),
         onTool,
         onText: (t) => patch(() => ({ text: t })),
       });
-      patch(() => ({ status: "done", text: answer }));
-      if (spoken) speak(splitFollowUps(answer).body);
+      patch(() => ({ status: "done", text: answer, ms: Date.now() - startedAt }));
+      if (spoken && canSpeak) {
+        setSpeakingId(id);
+        speak(splitFollowUps(answer).body, () => setSpeakingId(null));
+      }
     } catch (error) {
-      patch(() => ({ status: "failed", error: error.message }));
+      if (error.name === "AbortError") patch(() => ({ status: "stopped", ms: Date.now() - startedAt }));
+      else patch(() => ({ status: "failed", error: error.message, ms: Date.now() - startedAt }));
     } finally {
       setBusy(false);
     }
@@ -179,31 +211,50 @@ export default function Chat({ onTool, selectedName, outbox }) {
   function addFiles(list) {
     const picked = [...list];
     const tooBig = picked.find((f) => f.size > MAX_FILE_BYTES);
-    if (tooBig) return setNotice(`${tooBig.name} is larger than 4 MB. Attach a smaller file.`);
+    if (tooBig) return setToast(`${tooBig.name} is larger than 4 MB. Attach a smaller file.`);
+    if (files.length + picked.length > 3) setToast("Up to 3 files per message.");
     setFiles((current) => [...current, ...picked].slice(0, 3));
   }
 
   function toggleMic() {
     if (listening) return stopListening.current?.();
+    stopSpeaking();
+    setSpeakingId(null);
     setListening(true);
     stopListening.current = listen({
       onInterim: setText,
-      onFinal: (said) => send(said, true),
+      onFinal: (said) => send(said, { spoken: true }),
       onEnd: () => setListening(false),
     });
   }
+
+  function editQuestion(message) {
+    setText(message.text);
+    document.querySelector(".composer textarea")?.focus();
+  }
+
+  const lastId = messages.length ? messages[messages.length - 1].id : null;
+  const asked = chats.filter((c) => c.messages.length).length;
 
   return (
     <div className="chat">
       <div className="chat-head">
         <span className="chat-title" title={active.title}>{active.title}</span>
-        <button type="button" onClick={() => setShowHistory(!showHistory)} aria-expanded={showHistory}>History ({chats.filter((c) => c.messages.length).length})</button>
-        <button type="button" className="is-strong" onClick={() => { start(); setShowHistory(false); }} disabled={busy}>New chat</button>
+        <button type="button" onClick={() => setOverlay(overlay === "activity" ? null : "activity")} aria-expanded={overlay === "activity"}
+          title="Tools, timings and inputs behind each answer"><Icon name="activity" size={14} />Activity</button>
+        <button type="button" onClick={() => setOverlay(overlay === "history" ? null : "history")} aria-expanded={overlay === "history"}>
+          <Icon name="history" size={14} />History{asked > 0 && ` (${asked})`}
+        </button>
+        <button type="button" className="is-strong" onClick={() => { start(); setOverlay(null); }} disabled={busy}><Icon name="plus" size={14} />New chat</button>
       </div>
-      {showHistory && (
-        <History chats={chats} activeId={active.id} onOpen={open} onRename={rename} onRemove={remove} onClose={() => setShowHistory(false)} />
+      {overlay === "history" && (
+        <History chats={chats} activeId={active.id} onOpen={open} onRename={rename}
+          onRemove={(id) => { remove(id); setToast("Chat deleted"); }} onClose={() => setOverlay(null)} />
       )}
-      <div className="chat-scroll" ref={scroller} aria-live="polite">
+      {overlay === "activity" && <Activity messages={messages} onClose={() => setOverlay(null)} />}
+
+      <div className="chat-scroll" ref={scroller}
+        onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
         {messages.length === 0 ? (
           <div className="welcome">
             <h2>Ask the advisor</h2>
@@ -223,9 +274,16 @@ export default function Chat({ onTool, selectedName, outbox }) {
                 : <span className="chip" key={file.name}>{file.name}</span>;
             })}
             <p>{m.text}</p>
+            {!busy && <button type="button" className="edit" onClick={() => editQuestion(m)} aria-label="Edit this question" title="Edit this question"><Icon name="edit" size={14} /></button>}
           </div>
-        ) : <Answer message={m} key={m.id} onAsk={send} isLast={m.id === messages[messages.length - 1].id && !busy} />))}
+        ) : (
+          <Answer key={m.id} message={m} isLast={m.id === lastId && !busy} speaking={speakingId === m.id}
+            onAsk={(q) => send(q)} onSpeak={() => toggleSpeak(m)} onRetry={() => send(m.question || "", { attached: [] })}
+            onActivity={() => setOverlay("activity")} notify={setToast} />
+        )))}
       </div>
+
+      {toast && <p className="toast" role="status">{toast}</p>}
 
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         {selectedName && messages.length > 0 && !busy && (
@@ -245,11 +303,10 @@ export default function Chat({ onTool, selectedName, outbox }) {
             ))}
           </div>
         )}
-        {notice && <p className="error">{notice}</p>}
         <div className="composer-box">
           <textarea
             value={text} rows={1} disabled={busy}
-            placeholder={listening ? "Listening. Speak your question." : "Ask about a business, the budget, or the whole queue"}
+            placeholder={listening ? "Listening. Speak your question." : busy ? "The advisor is answering" : "Ask about a business, the budget, or the whole queue"}
             aria-label="Message to the advisor"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(text); } }}
@@ -258,18 +315,20 @@ export default function Chat({ onTool, selectedName, outbox }) {
             <input ref={fileInput} type="file" hidden multiple accept={ACCEPT}
               onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
             <button type="button" className="icon-btn" title="Attach an application letter, photo or PDF"
-              aria-label="Attach a file" onClick={() => fileInput.current.click()}>
+              aria-label="Attach a file" disabled={busy} onClick={() => fileInput.current.click()}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.5l-8.5 8.5a5.5 5.5 0 01-7.8-7.8L13.5 4.4a3.7 3.7 0 015.2 5.2l-8.7 8.7a1.8 1.8 0 01-2.6-2.6l8-8" /></svg>
             </button>
             {canListen && (
-              <button type="button" className={`icon-btn${listening ? " is-live" : ""}`}
+              <button type="button" className={`icon-btn${listening ? " is-live" : ""}`} disabled={busy}
                 title={listening ? "Stop listening" : "Ask by voice"} aria-label={listening ? "Stop listening" : "Ask by voice"}
                 aria-pressed={listening} onClick={toggleMic}>
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0014 0M12 18v3" /></svg>
               </button>
             )}
-            <span className="composer-hint">{busy ? "The advisor is working" : "Enter to send"}</span>
-            <button type="submit" className="send" disabled={busy || !text.trim()}>Send</button>
+            <span className="composer-hint">{busy ? "" : "Enter to send, Shift Enter for a new line"}</span>
+            {busy
+              ? <button type="button" className="send is-stop" onClick={() => aborter.current?.abort()}>Stop</button>
+              : <button type="submit" className="send" disabled={!text.trim()}>Send</button>}
           </div>
         </div>
       </form>

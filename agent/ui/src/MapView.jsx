@@ -14,7 +14,7 @@ const QUIET = [
 // Daylight map: the standard Google look with the colour turned down, so the dots stand out.
 const LIGHT_STYLE = [...QUIET, { stylers: [{ saturation: -55 }, { lightness: 8 }] }];
 const SIZE = { "Ubiquitous Hub": 8, "Target Anchor": 7, "Small/Peripheral Supplier": 5.5, "Leaf Node": 4.5 };
-const STEP_MS = 650;
+const STEP_MS = 300;
 
 // Quiet night map: streets and names stay, shops and transit icons go, so our dots carry the story.
 const MAP_STYLE = [
@@ -85,10 +85,13 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
   onSelectRef.current = onSelect;
 
   useEffect(() => {
+    if (ready) ctx.current.map.setOptions({ styles: theme === "dark" ? MAP_STYLE : LIGHT_STYLE });
+  }, [ready, theme]);
+
+  useEffect(() => {
     const c = ctx.current;
     if (!ready || !c) return;
     const { maps, map, markers } = c;
-    map.setOptions({ styles: theme === "dark" ? MAP_STYLE : LIGHT_STYLE });
     c.timers.forEach(clearTimeout);
     c.lines.forEach((l) => l.setMap(null));
     c.timers = [];
@@ -109,23 +112,29 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
     }
     const focused = Boolean(view);
 
+    // Only markers whose look actually changed are redrawn, which keeps clicks snappy.
     const paint = (stage) => {
-      for (const [id, { marker, node }] of markers) {
+      for (const [id, record] of markers) {
+        const { marker, node } = record;
         let kind = state.get(id);
-        // Nodes light up hop by hop while the links draw.
         if (kind === "hop1" && stage < 1) kind = null;
         if (kind === "hop2" && stage < 2) kind = null;
         const size = SIZE[node.role] || 5;
         const isFunded = funded.has(id);
         const fill = kind ? COLORS[kind] : isFunded || protectedIds.has(id) ? COLORS.safe : COLORS.idle;
         const dim = focused && !kind && !isFunded;
-        marker.setIcon(icon(maps, fill, kind === "closed" && view.kind === "cascade" ? 12 : kind ? size + 1.5 : size, {
+        const scale = kind === "closed" && view.kind === "cascade" ? 12 : kind ? size + 1.5 : size;
+        const showLabel = labels.has(id) && (stage >= 2 || kind === "closed");
+        const key = `${fill}|${scale}|${dim}|${isFunded}|${showLabel}|${theme}`;
+        if (record.key === key) continue;
+        record.key = key;
+        marker.setIcon(icon(maps, fill, scale, {
           ring: isFunded || node.applicant ? COLORS.queue : COLORS.ring,
           weight: isFunded ? 3 : node.applicant ? 2 : 1.2,
           opacity: dim ? 0.28 : 1,
         }));
         marker.setZIndex(kind === "closed" ? 30 : kind ? 20 : isFunded ? 15 : node.applicant ? 10 : 1);
-        marker.setLabel(labels.has(id) && stage >= 2
+        marker.setLabel(showLabel
           ? { text: node.name.length > 26 ? `${node.name.slice(0, 24)}…` : node.name, className: "map-label" }
           : null);
       }
@@ -139,20 +148,23 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
         clickable: false, zIndex: 5,
       }));
     });
-
-    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!view && c.framed) {
-      c.framed = null;
-      map.fitBounds(c.all, 24);
-    }
-    if (!view || still) {
+    const drawAll = () => {
       if (view?.kind === "cascade") {
         drawLinks(view.links.filter((l) => l.hop === 1), COLORS.hop1, 2);
         drawLinks(view.links.filter((l) => l.hop > 1), COLORS.hop2, 1.2);
       } else if (view) drawLinks(view.links, COLORS.closed, 1.2);
+    };
+
+    // Replay the spread only for a new selection, not when a grant or the theme changes.
+    const isNew = c.shown !== view;
+    c.shown = view;
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!view || still || !isNew) {
+      drawAll();
       paint(2);
       return;
     }
+
     paint(0);
     if (view.kind === "cascade") {
       drawLinks(view.links.filter((l) => l.hop === 1), COLORS.hop1, 2);
@@ -165,12 +177,19 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
     }
     c.timers.push(setTimeout(() => paint(2), STEP_MS * 2));
 
-    // Frame the whole cascade once per selection, leaving room for the headline.
-    if (c.framed !== view) {
-      c.framed = view;
+    // Move the map only when part of the cascade is off screen.
+    const visible = map.getBounds();
+    const points = [...state.keys()].filter((id) => markers.has(id)).map((id) => markers.get(id).position);
+    // "On screen" means clear of the edges and of the headline, not merely inside the frame.
+    const comfortable = (p) => {
+      const ne = visible.getNorthEast(), sw = visible.getSouthWest();
+      const h = ne.lat() - sw.lat(), w = ne.lng() - sw.lng();
+      return p.lat < ne.lat() - 0.16 * h && p.lat > sw.lat() + 0.1 * h && p.lng > sw.lng() + 0.08 * w && p.lng < ne.lng() - 0.08 * w;
+    };
+    if (points.length && visible && !points.every(comfortable)) {
       const focus = new maps.LatLngBounds();
-      for (const id of state.keys()) if (markers.has(id)) focus.extend(markers.get(id).position);
-      if (!focus.isEmpty()) map.fitBounds(focus, { top: 90, bottom: 60, left: 40, right: 40 });
+      points.forEach((p) => focus.extend(p));
+      map.fitBounds(focus, { top: 90, bottom: 60, left: 40, right: 40 });
     }
   }, [ready, view, funded, protectedIds, theme]);
 

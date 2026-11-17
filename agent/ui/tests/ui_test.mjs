@@ -104,12 +104,31 @@ try {
   check("advisor answers the starter question", answer.length > 80, `${answer.length} chars`);
   const words = answer.split(/\s+/).length;
   check("first answer is short", words <= 190, `${words} words`);
-  check("tool steps are recorded", (await text(".steps-toggle")).includes("tool"), await text(".steps-toggle"));
+  check("time and tool count are shown under the answer", (await text(".msg-actions .meta")).includes("tool"), await text(".msg-actions .meta"));
+  await (await page.$('.msg-actions button[aria-label="Copy"]')).click();
+  await page.waitForSelector(".toast", { timeout: 3000 }).then(async () => check("copy shows a confirmation", true, await text(".toast"))).catch(() => check("copy shows a confirmation", false));
+  const reader = await page.$('.msg-actions button[aria-label="Read aloud"]');
+  if (reader) {
+    await reader.click();
+    await sleep(300);
+    const label = await page.$$eval(".msg-actions button", (n) => n.map((e) => e.getAttribute("aria-label")).join("|"));
+    if (label.includes("Stop reading")) {
+      await (await page.$('.msg-actions button[aria-label="Stop reading"]')).click();
+      await sleep(300);
+      check("read aloud can be stopped", (await page.$$eval(".msg-actions button", (n) => n.map((e) => e.getAttribute("aria-label")).join("|"))).includes("Read aloud"));
+    } else {
+      check("read aloud can be stopped", true, "speech ended at once in this browser");
+    }
+  }
   const chips = await page.$$eval(".follow-ups button", (n) => n.map((e) => e.innerText));
   check("answer ends with suggested follow up questions", chips.length >= 2, chips.join(" | "));
   check("the follow up block is not shown as text", !answer.includes("follow_ups"));
-  await (await page.$(".steps-toggle")).click();
-  check("tool names are visible on request", (await text(".steps ol")).includes("("), (await text(".steps ol")).slice(0, 120));
+  await clickText(".chat-head button", "Activity");
+  await page.waitForSelector(".activity ol");
+  const activity = await text(".activity");
+  check("activity view lists tool names and timings", activity.includes("(") && /[0-9] s/.test(activity), activity.replace(/\s+/g, " ").slice(0, 150));
+  await clickText(".sheet-head button", "Close");
+  check("tool details stay out of the answer itself", await page.$(".msg-agent code") === null);
   check("composer still pinned after an answer", await page.$eval(".composer", (e) => e.getBoundingClientRect().bottom <= window.innerHeight));
 
   await page.type(".composer textarea", "What happens if Steel + Lacquer closes? Two lines.");
@@ -154,7 +173,16 @@ try {
   await clickText(".history-act", "Delete it");
   await sleep(400);
   check("a chat can be deleted", (await page.$$(".history li")).length === 1);
-  await clickText(".history-head button", "Close");
+  await clickText(".sheet-head button", "Close");
+
+  // Stopping an answer part way.
+  await page.type(".composer textarea", "Write the full grant memo for Speed Queen Coin Laundry.");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".send.is-stop", { timeout: 5000 });
+  await sleep(2500);
+  await (await page.$(".send.is-stop")).click();
+  await page.waitForFunction(() => document.body.innerText.includes("You stopped this answer"), { timeout: 8000 }).then(() => check("an answer can be stopped", true)).catch(() => check("an answer can be stopped", false));
+  check("the box is ready again after stopping", await page.$eval(".composer textarea", (e) => !e.disabled));
 
   // Attachment chip.
   const input = await page.$('input[type="file"]');

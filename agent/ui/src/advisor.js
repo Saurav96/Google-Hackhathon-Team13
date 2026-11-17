@@ -75,10 +75,11 @@ export async function saveFile(file) {
 }
 
 // onStep(label) per tool call, onTool(name, args) so the map can follow, onText(text) as the answer grows.
-export async function ask(question, { sessionId, files = [], onStep, onTool, onText }) {
+export async function ask(question, { sessionId, files = [], signal, onStep, onStepDone, onTool, onText }) {
   const parts = [...(await Promise.all(files.map(fileToPart))), { text: question }];
   const response = await fetch("/run_sse", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       app_name: APP, user_id: userId(), session_id: sessionId, streaming: true,
@@ -113,11 +114,14 @@ export async function ask(question, { sessionId, files = [], onStep, onTool, onT
           if (seenCalls.has(part.functionCall.id)) continue;
           seenCalls.add(part.functionCall.id);
           onStep?.({
+            id: part.functionCall.id,
             label: TOOL_LABELS[part.functionCall.name] || part.functionCall.name,
             tool: part.functionCall.name,
             args: describeArgs(part.functionCall.args),
           });
           onTool?.(part.functionCall.name, part.functionCall.args || {});
+        } else if (part.functionResponse) {
+          onStepDone?.(part.functionResponse.id);
         } else if (typeof part.text === "string" && !part.thought && event.content.role === "model") {
           if (event.partial) draft += part.text;
           else { settled += part.text; draft = ""; }
