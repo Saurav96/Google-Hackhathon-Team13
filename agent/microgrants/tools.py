@@ -1,3 +1,4 @@
+import math
 import os
 from functools import lru_cache
 from collections import Counter
@@ -79,10 +80,10 @@ def _best_paths(rows: tuple[dict, ...]) -> dict[str, dict]:
 def _profile(business_id: str) -> dict | None:
     rows = _rows(
         f"""
-        SELECT b.business_id, b.name, b.address, b.zip, b.naics4,
+        SELECT b.business_id, b.name, b.address, b.zip, b.naics4, b.network_role,
           (SELECT COUNT(*) FROM `{PROJECT}.{DATASET}.businesses` p
             WHERE p.naics4 = b.naics4 AND p.business_id != b.business_id) AS same_industry_peers
-        FROM `{PROJECT}.{DATASET}.businesses` b
+        FROM `{PROJECT}.{DATASET}.businesses_enriched` b
         WHERE b.business_id = @id
         """,
         id=business_id,
@@ -151,7 +152,8 @@ def trace_cascade(business_id: str, max_hops: int = 2) -> dict:
     if seed is None:
         return {"error": f"No business with id {business_id}. Use find_business first."}
 
-    best = _best_paths(_walk(business_id, _hops(max_hops), "downstream"))
+    paths = _walk(business_id, _hops(max_hops), "downstream")
+    best = _best_paths(paths)
     exposed = sorted(best.values(), key=lambda e: e["path_strength"], reverse=True)
     by_hops = Counter(e["hops"] for e in exposed)
     peers = seed["same_industry_peers"]
@@ -161,7 +163,7 @@ def trace_cascade(business_id: str, max_hops: int = 2) -> dict:
         "max_hops": _hops(max_hops),
         "exposed_total": len(exposed),
         "exposed_by_hops": {f"{h}_hop": n for h, n in sorted(by_hops.items())},
-        "weighted_exposure": round(sum(e["path_strength"] for e in exposed), 4),
+        "cascade_intensity": round(sum(math.prod(p["intensities"]) for p in paths), 4),
         "strongest_chains": exposed[:12],
         "furthest_chains": [e for e in exposed if e["hops"] > 1][:6],
         "replaceability": {
@@ -239,7 +241,8 @@ def compare_applicants(business_ids: list[str], max_hops: int = 2) -> dict:
                 "industry_naics4": result["seed"]["naics4"],
                 "exposed_total": result["exposed_total"],
                 "exposed_by_hops": result["exposed_by_hops"],
-                "weighted_exposure": result["weighted_exposure"],
+                "network_role": result["seed"]["network_role"],
+                "cascade_intensity": result["cascade_intensity"],
                 "same_industry_peers_in_corridor": result["replaceability"][
                     "same_industry_peers_in_corridor"
                 ],
@@ -252,9 +255,12 @@ def compare_applicants(business_ids: list[str], max_hops: int = 2) -> dict:
         "applicants": rows,
         "no_cascade": [r["name"] for r in rows if r.get("exposed_total") == 0],
         "how_to_read": (
-            "exposed_total counts businesses reached. weighted_exposure sums the strongest "
-            "path strength to each one. Many peers means buyers can switch locally, so a large "
-            "cascade from a business with many peers is weaker than it looks."
+            "exposed_total counts businesses reached. cascade_intensity sums link intensity "
+            "over every 1 hop path plus the product of intensities over every 2 hop path. "
+            "network_role: Ubiquitous Hub is over 80 reach, Target Anchor is 10 to 50, "
+            "Small/Peripheral Supplier is 1 to 9, Leaf Node is 0. A Ubiquitous Hub is usually a "
+            "lone local producer that the model gives all local demand to, so it is a weak "
+            "signal. Many peers means buyers can switch locally."
         ),
     }
 
