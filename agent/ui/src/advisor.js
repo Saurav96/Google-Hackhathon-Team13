@@ -32,6 +32,8 @@ const TOOL_LABELS = {
   simulate_employer_closure: "Walked forward to lost footfall, then back to suppliers",
   equity_audit: "Audited where the money lands",
   data_health_check: "Validated the tables behind the graph",
+  evaluate_selection: "Totalled the grants selected in the report",
+  propose_report_edit: "Proposed new text for the report",
   execute_sql_readonly: "Queried BigQuery through the managed MCP server",
 };
 
@@ -75,8 +77,11 @@ export async function saveFile(file) {
 }
 
 // onStep(label) per tool call, onTool(name, args) so the map can follow, onText(text) as the answer grows.
-export async function ask(question, { sessionId, files = [], signal, onStep, onStepDone, onTool, onText }) {
-  const parts = [...(await Promise.all(files.map(fileToPart))), { text: question }];
+export async function ask(question, { sessionId, context = "", files = [], signal, onStep, onStepDone, onTool, onToolResult, onText }) {
+  // The report's state travels with the question, so the advisor answers about what is on screen.
+  const text = context ? `[Report context, not typed by the officer: ${context}]\n\n${question}` : question;
+  const parts = [...(await Promise.all(files.map(fileToPart))), { text }];
+  const calls = new Map();
   const response = await fetch("/run_sse", {
     method: "POST",
     signal,
@@ -113,6 +118,7 @@ export async function ask(question, { sessionId, files = [], signal, onStep, onS
         if (part.functionCall) {
           if (seenCalls.has(part.functionCall.id)) continue;
           seenCalls.add(part.functionCall.id);
+          calls.set(part.functionCall.id, part.functionCall);
           onStep?.({
             id: part.functionCall.id,
             label: TOOL_LABELS[part.functionCall.name] || part.functionCall.name,
@@ -122,6 +128,10 @@ export async function ask(question, { sessionId, files = [], signal, onStep, onS
           onTool?.(part.functionCall.name, part.functionCall.args || {});
         } else if (part.functionResponse) {
           onStepDone?.(part.functionResponse.id);
+          // Only a finished, successful tool result may become a proposal on the report.
+          const call = calls.get(part.functionResponse.id);
+          const result = part.functionResponse.response;
+          if (call && result && !result.error && !signal?.aborted) onToolResult?.(call.name, call.args || {}, result);
         } else if (typeof part.text === "string" && !part.thought && event.content.role === "model") {
           if (event.partial) draft += part.text;
           else { settled += part.text; draft = ""; }

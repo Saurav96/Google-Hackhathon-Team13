@@ -52,7 +52,7 @@ def simulate_employer_closure(block_id: str, max_hops: int = 2) -> dict:
     """
     hops = data.clamp_hops(max_hops)
     employer = data.rows(
-        f"SELECT block_id, tract, jobs FROM `{data.PROJECT}.{data.DATASET}.employer_blocks` WHERE block_id = @id",
+        f"SELECT block_id, tract, jobs, lat, lon FROM `{data.PROJECT}.{data.DATASET}.employer_blocks` WHERE block_id = @id",
         id=block_id,
     )
     if not employer:
@@ -136,6 +136,13 @@ def simulate_employer_closure(block_id: str, max_hops: int = 2) -> dict:
             if s["business_id"] not in lost
         ],
         "links": [{"source": a, "target": b} for a, b in links],
+        # The block's coordinates are approximate to its census tract, so the screen labels it so.
+        "origin": {"block_id": block_id, "jobs": employer[0]["jobs"], "lat": employer[0]["lat"], "lon": employer[0]["lon"]},
+        "footfall": [
+            {"target": s["business_id"], "workers": s["workers_from_block"], "share": s["share_of_footfall_lost"]}
+            for s in first_order
+        ],
+        "distinct_total": len(exposed_ids),
     }
     return {
         "employer_block": employer[0],

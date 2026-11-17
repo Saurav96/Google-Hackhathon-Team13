@@ -8,7 +8,8 @@ import { useChats } from "./sessions.js";
 import { canListen, canSpeak, listen, speak, stopSpeaking } from "./voice.js";
 
 const STARTERS = [
-  ["Who should I fund?", "I have the applicants in my queue and my budget. Who should I fund, and how should I split the money? Write the grant memo."],
+  ["How should we split the budget?", "Look at my queue and my budget. How should I split the money, and why?"],
+  ["Write the full grant memo", "Write the full grant memo for the grants selected in my report. If none are selected, recommend a split first."],
   ["Why not the biggest one?", "Look at my queue. Which applicant has the biggest cascade, and why should I not just fund that one?"],
   ["A big employer is leaving", "The largest employer block is leaving in 90 days. Who is exposed, including businesses that never applied?"],
   ["Is this fair?", "Audit the recommended grants. Whose neighborhood do they help, and is the model biased?"],
@@ -17,7 +18,7 @@ const ACCEPT = "image/*,application/pdf,text/plain,text/csv,.md";
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const seconds = (ms) => `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
 
-function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity, notify }) {
+function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity, notify, onAddToReport }) {
   const { body, followUps } = splitFollowUps(message.text || "");
   const html = DOMPurify.sanitize(marked.parse(body));
   const running = message.status === "running";
@@ -90,8 +91,13 @@ function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity
       {!running && body && (
         <div className="msg-actions">
           <button type="button" onClick={copy} title="Copy" aria-label="Copy"><Icon name={copied ? "check" : "copy"} /></button>
-          <button type="button" title="Download as a PDF report" aria-label="Download report" onClick={download} disabled={downloading}>
-            <Icon name="download" /><span>{downloading ? "Preparing" : "Report"}</span>
+          {onAddToReport && body.length > 400 && (
+            <button type="button" title="Add this to the report as the advisor memo" aria-label="Add to report" onClick={() => onAddToReport(body)}>
+              <Icon name="add" /><span>Add to report</span>
+            </button>
+          )}
+          <button type="button" title="Download this answer as a PDF" aria-label="Download this answer" onClick={download} disabled={downloading}>
+            <Icon name="download" />
           </button>
           {canSpeak && (
             <button type="button" className={speaking ? "is-on" : ""} onClick={onSpeak} aria-pressed={speaking}
@@ -110,7 +116,7 @@ function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity
   );
 }
 
-export default function Chat({ onTool, selectedName, outbox }) {
+export default function Chat({ onTool, onToolResult, selectedName, outbox, context, scopeName, onClearScope, onAddToReport }) {
   const { chats, active, open, start, rename, remove, update } = useChats();
   const messages = active.messages;
   const [overlay, setOverlay] = useState(null);
@@ -196,6 +202,7 @@ export default function Chat({ onTool, selectedName, outbox }) {
       }
       const answer = await ask(q, {
         sessionId: chatId,
+        context,
         files: attached,
         signal: aborter.current.signal,
         onStep: (step) => patch((m) => ({ steps: [...m.steps, { ...step, at: Date.now() - startedAt }] })),
@@ -203,6 +210,7 @@ export default function Chat({ onTool, selectedName, outbox }) {
           steps: m.steps.map((s) => (s.id === callId && s.ms == null ? { ...s, ms: Date.now() - startedAt - s.at } : s)),
         })),
         onTool,
+        onToolResult,
         onText: (t) => patch(() => ({ text: t })),
       });
       patch(() => ({ status: "done", text: answer, ms: Date.now() - startedAt }));
@@ -268,7 +276,7 @@ export default function Chat({ onTool, selectedName, outbox }) {
         {messages.length === 0 ? (
           <div className="welcome">
             <h2>Ask the advisor</h2>
-            <p>Ask in plain words, or click any dot on the map. The advisor walks the business graph and writes a grant memo you can print.</p>
+            <p>The report on the right is yours to edit. Ask about it in plain words. The advisor walks the business graph and proposes changes, and nothing changes until you apply it.</p>
             <div className="starters">
               {STARTERS.map(([label, question]) => (
                 <button type="button" key={label} onClick={() => send(question)}>{label}</button>
@@ -289,13 +297,19 @@ export default function Chat({ onTool, selectedName, outbox }) {
         ) : (
           <Answer key={m.id} message={m} isLast={m.id === lastId && !busy} speaking={speakingId === m.id}
             onAsk={(q) => send(q)} onSpeak={() => toggleSpeak(m)} onRetry={() => send(m.question || "", { attached: [] })}
-            onActivity={() => setOverlay("activity")} notify={setToast} />
+            onActivity={() => setOverlay("activity")} notify={setToast} onAddToReport={onAddToReport} />
         )))}
       </div>
 
       {toast && <p className="toast" role="status">{toast}</p>}
 
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
+        {scopeName && (
+          <p className="scope">
+            <Icon name="chat" size={13} />Discussing: {scopeName}
+            <button type="button" onClick={onClearScope} aria-label="Discuss the whole report instead" title="Discuss the whole report"><Icon name="close" size={13} /></button>
+          </p>
+        )}
         {selectedName && messages.length > 0 && !busy && (
           <div className="suggest">
             <button type="button" onClick={() => send(`Write the grant memo for ${selectedName}. Say plainly if it is not a good grant.`)}>
@@ -316,7 +330,7 @@ export default function Chat({ onTool, selectedName, outbox }) {
         <div className="composer-box">
           <textarea
             value={text} rows={1} disabled={busy}
-            placeholder={listening ? "Listening. Speak your question." : busy ? "The advisor is answering" : "Ask about a business, the budget, or the whole queue"}
+            placeholder={listening ? "Listening. Speak your question." : busy ? "The advisor is answering" : scopeName ? `Ask about ${scopeName.toLowerCase()}` : "Ask about a business or the plan"}
             aria-label="Message to the advisor"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(text); } }}

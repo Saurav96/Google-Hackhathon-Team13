@@ -1,10 +1,17 @@
 import { Loader } from "@googlemaps/js-api-loader";
-import { useEffect, useRef, useState } from "react";
-import { roleOf } from "./api.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import RelationshipCard from "./RelationshipCard.jsx";
+import "./map.css";
 
 const PALETTE = {
-  dark: { closed: "#ff5d73", hop1: "#ffb23e", hop2: "#ffe08a", safe: "#3ddbb4", idle: "#a9b4d6", ring: "#151a2d", queue: "#ffffff" },
-  light: { closed: "#d42a4b", hop1: "#ef8a00", hop2: "#f3c623", safe: "#0c9f80", idle: "#7d88ab", ring: "#ffffff", queue: "#171c30" },
+  dark: {
+    closed: "#ff5d73", hop1: "#ffb23e", hop2: "#ffe08a", safe: "#3ddbb4", idle: "#a9b4d6", ring: "#151a2d", queue: "#ffffff",
+    supply: "#9aa8ff", worker: "#3ddbb4", block: "#ffb23e", proposed: "#c79bff",
+  },
+  light: {
+    closed: "#d42a4b", hop1: "#ef8a00", hop2: "#f3c623", safe: "#0c9f80", idle: "#7d88ab", ring: "#ffffff", queue: "#171c30",
+    supply: "#3340c4", worker: "#0c8f73", block: "#e07b00", proposed: "#8a3fd1",
+  },
 };
 const QUIET = [
   { featureType: "poi", stylers: [{ visibility: "off" }] },
@@ -15,15 +22,15 @@ const QUIET = [
 const LIGHT_STYLE = [...QUIET, { stylers: [{ saturation: -55 }, { lightness: 8 }] }];
 const SIZE = { "Ubiquitous Hub": 8, "Target Anchor": 7, "Small/Peripheral Supplier": 5.5, "Leaf Node": 4.5 };
 const STEP_MS = 300;
+const SQUARE = "M -1 -1 L 1 -1 L 1 1 L -1 1 Z";
+const NONE = new Set();
 
 // Quiet night map: streets and names stay, shops and transit icons go, so our dots carry the story.
 const MAP_STYLE = [
   { elementType: "geometry", stylers: [{ color: "#1b2238" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#8f9bc0" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#151a2d" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "road", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  ...QUIET,
   { featureType: "road", elementType: "geometry", stylers: [{ color: "#2c3554" }] },
   { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#364066" }] },
   { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#414c78" }] },
@@ -38,12 +45,17 @@ function icon(maps, fill, scale, { ring, weight = 1.2, opacity = 1 } = {}) {
   };
 }
 
-export default function MapView({ apiKey, nodes, view, funded, protectedIds, onSelect, theme, reserveRight = 40 }) {
+export default function MapView({
+  apiKey, nodes, view, funded, protectedIds, onSelect, theme, reserveRight = 40,
+  linkFilter = "all", edgeIntensity, proposedIds = NONE,
+}) {
   const COLORS = PALETTE[theme] || PALETTE.light;
   const holder = useRef(null);
   const ctx = useRef(null);
   const [problem, setProblem] = useState("");
   const [ready, setReady] = useState(false);
+  const [relation, setRelation] = useState(null);
+  const closeRelation = useCallback(() => setRelation(null), []);
 
   useEffect(() => {
     if (!apiKey || !nodes.length || ctx.current) return;
@@ -73,8 +85,13 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
         markers.set(n.id, { marker, node: n, position });
       }
       map.fitBounds(bounds, 24);
-      map.addListener("click", () => onSelectRef.current(null));
-      ctx.current = { maps, map, markers, lines: [], timers: [], all: bounds, framed: null };
+      const c = { maps, map, markers, lines: [], timers: [], all: bounds, framed: null, origin: null, linkClickAt: 0 };
+      map.addListener("click", () => {
+        setRelation(null);
+        // A click on a link must not also clear the selected business.
+        if (Date.now() - c.linkClickAt > 300) onSelectRef.current(null);
+      });
+      ctx.current = c;
       setReady(true);
     }).catch(() => setProblem("Google Maps did not load. The advisor and the lists still work."));
     window.gm_authFailure = () => setProblem("Google Maps rejected the key. The advisor and the lists still work.");
@@ -88,6 +105,8 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
     if (ready) ctx.current.map.setOptions({ styles: theme === "dark" ? MAP_STYLE : LIGHT_STYLE });
   }, [ready, theme]);
 
+  useEffect(() => setRelation(null), [view, linkFilter]);
+
   useEffect(() => {
     const c = ctx.current;
     if (!ready || !c) return;
@@ -96,6 +115,7 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
     c.lines.forEach((l) => l.setMap(null));
     c.timers = [];
     c.lines = [];
+    if (c.origin) { c.origin.setMap(null); c.origin = null; }
 
     const state = new Map();
     const labels = new Set();
@@ -111,6 +131,8 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
       view.second.slice(0, 2).forEach((s) => labels.add(s.id));
     }
     const focused = Boolean(view);
+    const showSupply = linkFilter !== "worker";
+    const showWorker = linkFilter !== "supply";
 
     // Only markers whose look actually changed are redrawn, which keeps clicks snappy.
     const paint = (stage) => {
@@ -121,64 +143,123 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
         if (kind === "hop2" && stage < 2) kind = null;
         const size = SIZE[node.role] || 5;
         const isFunded = funded.has(id);
+        // A proposal is drawn as an outline only, so it never reads as an applied grant.
+        const isProposed = !isFunded && proposedIds.has(id);
         const fill = kind ? COLORS[kind] : isFunded || protectedIds.has(id) ? COLORS.safe : COLORS.idle;
-        const dim = focused && !kind && !isFunded;
-        const scale = kind === "closed" && view.kind === "cascade" ? 12 : kind ? size + 1.5 : size;
+        const dim = focused && !kind && !isFunded && !isProposed;
+        const base = kind === "closed" && view.kind === "cascade" ? 12 : kind ? size + 1.5 : size;
+        const scale = isProposed ? base + 2 : base;
         const showLabel = labels.has(id) && (stage >= 2 || kind === "closed");
-        const key = `${fill}|${scale}|${dim}|${isFunded}|${showLabel}|${theme}`;
+        const key = `${fill}|${scale}|${dim}|${isFunded}|${isProposed}|${showLabel}|${theme}`;
         if (record.key === key) continue;
         record.key = key;
         marker.setIcon(icon(maps, fill, scale, {
-          ring: isFunded || node.applicant ? COLORS.queue : COLORS.ring,
-          weight: isFunded ? 3 : node.applicant ? 2 : 1.2,
+          ring: isProposed ? COLORS.proposed : isFunded || node.applicant ? COLORS.queue : COLORS.ring,
+          weight: isProposed ? 3.5 : isFunded ? 3 : node.applicant ? 2 : 1.2,
           opacity: dim ? 0.28 : 1,
         }));
-        marker.setZIndex(kind === "closed" ? 30 : kind ? 20 : isFunded ? 15 : node.applicant ? 10 : 1);
+        marker.setZIndex(kind === "closed" ? 30 : kind ? 20 : isFunded ? 15 : isProposed ? 14 : node.applicant ? 10 : 1);
         marker.setLabel(showLabel
           ? { text: node.name.length > 26 ? `${node.name.slice(0, 24)}…` : node.name, className: "map-label" }
           : null);
       }
     };
 
-    const drawLinks = (links, color, weight) => links.forEach((l) => {
-      const a = markers.get(l.source), b = markers.get(l.target);
-      if (!a || !b) return;
-      c.lines.push(new maps.Polyline({
-        map, path: [a.position, b.position], strokeColor: color, strokeOpacity: 0.75, strokeWeight: weight,
-        clickable: false, zIndex: 5,
-      }));
+    // Each link is a visible line plus a wide invisible one on top, so it is easy to click.
+    const addLine = (from, to, style, info) => {
+      c.lines.push(new maps.Polyline({ map, path: [from, to], clickable: false, zIndex: 5, ...style }));
+      const hit = new maps.Polyline({ map, path: [from, to], strokeOpacity: 0.01, strokeWeight: 14, clickable: true, zIndex: 6 });
+      hit.addListener("click", () => {
+        c.linkClickAt = Date.now();
+        setRelation(info);
+      });
+      c.lines.push(hit);
+    };
+    const arrow = (color, scale = 2) => ({
+      icon: { path: maps.SymbolPath.FORWARD_CLOSED_ARROW, scale, strokeColor: color, strokeWeight: 1, fillColor: color, fillOpacity: 1, strokeOpacity: 1 },
+      offset: "82%",
     });
-    const drawAll = () => {
-      if (view?.kind === "cascade") {
-        drawLinks(view.links.filter((l) => l.hop === 1), COLORS.hop1, 2);
-        drawLinks(view.links.filter((l) => l.hop > 1), COLORS.hop2, 1.2);
-      } else if (view) drawLinks(view.links, COLORS.closed, 1.2);
+
+    const drawSupply = (links, thin) => {
+      if (!showSupply) return;
+      for (const l of links) {
+        const a = markers.get(l.source), b = markers.get(l.target);
+        if (!a || !b) continue;
+        addLine(a.position, b.position, {
+          strokeColor: COLORS.supply, strokeOpacity: thin ? 0.4 : 0.8, strokeWeight: thin ? 1 : 1.7,
+          icons: [arrow(COLORS.supply, thin ? 1.4 : 2)],
+        }, {
+          type: "supply", sourceName: a.node.name, targetName: b.node.name, hop: l.hop || null,
+          intensity: edgeIntensity?.get(`${l.source}>${l.target}`) ?? null,
+        });
+      }
     };
 
-    // Replay the spread only for a new selection, not when a grant or the theme changes.
+    const hasOrigin = view?.kind === "closure" && view.origin && Number.isFinite(view.origin.lat) && Number.isFinite(view.origin.lon);
+    const originPosition = hasOrigin ? { lat: view.origin.lat, lng: view.origin.lon } : null;
+    const drawWorker = () => {
+      if (!hasOrigin) return;
+      const jobs = Number(view.origin.jobs || 0).toLocaleString("en-US");
+      c.origin = new maps.Marker({
+        map, position: originPosition, zIndex: 40, clickable: false,
+        title: "Workplace block. Approximate location, placed at its census tract.",
+        icon: {
+          path: SQUARE, scale: 9, fillColor: COLORS.block, fillOpacity: 1, strokeColor: COLORS.queue, strokeWeight: 2,
+          labelOrigin: new maps.Point(0, -2.4),
+        },
+        label: { text: `Workplace block, ${jobs} workers (approximate location)`, className: "map-label" },
+      });
+      if (!showWorker) return;
+      for (const f of view.footfall || []) {
+        const b = markers.get(f.target);
+        if (!b) continue;
+        addLine(originPosition, b.position, {
+          strokeOpacity: 0,
+          icons: [
+            { icon: { path: "M 0,-1 0,1", strokeColor: COLORS.worker, strokeOpacity: 0.95, strokeWeight: 2.2, scale: 2.4 }, offset: "0", repeat: "11px" },
+            arrow(COLORS.worker),
+          ],
+        }, { type: "worker", targetName: b.node.name, workers: f.workers, share: f.share });
+      }
+    };
+
+    const drawAll = () => {
+      if (view?.kind === "cascade") {
+        drawSupply(view.links.filter((l) => l.hop === 1), false);
+        drawSupply(view.links.filter((l) => l.hop > 1), true);
+      } else if (view) {
+        drawWorker();
+        drawSupply(view.links, false);
+      }
+    };
+
+    // Replay the spread only for a new selection, not when a grant, a filter or the theme changes.
     const isNew = c.shown !== view;
     c.shown = view;
     const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!view || still || !isNew) {
       drawAll();
       paint(2);
-      return;
-    }
-
-    paint(0);
-    if (view.kind === "cascade") {
-      drawLinks(view.links.filter((l) => l.hop === 1), COLORS.hop1, 2);
-      c.timers.push(setTimeout(() => {
-        paint(1);
-        drawLinks(view.links.filter((l) => l.hop > 1), COLORS.hop2, 1.2);
-      }, STEP_MS));
     } else {
-      c.timers.push(setTimeout(() => { paint(1); drawLinks(view.links, COLORS.closed, 1.2); }, STEP_MS));
+      paint(0);
+      if (view.kind === "cascade") {
+        drawSupply(view.links.filter((l) => l.hop === 1), false);
+        c.timers.push(setTimeout(() => {
+          paint(1);
+          drawSupply(view.links.filter((l) => l.hop > 1), true);
+        }, STEP_MS));
+      } else {
+        // Forward first: the block and the shops it feeds. Then backward to their suppliers.
+        drawWorker();
+        c.timers.push(setTimeout(() => { paint(1); drawSupply(view.links, false); }, STEP_MS));
+      }
+      c.timers.push(setTimeout(() => paint(2), STEP_MS * 2));
     }
-    c.timers.push(setTimeout(() => paint(2), STEP_MS * 2));
+    if (!view || !isNew) return;
 
-    // Move the map only when part of the cascade is off screen.
+    // Move the map only when part of the selection is off screen.
     const points = [...state.keys()].filter((id) => markers.has(id)).map((id) => markers.get(id).position);
+    if (originPosition) points.push(originPosition);
     const frame = () => {
       const visible = map.getBounds();
       // "On screen" means clear of the edges, the headline and the card, not merely inside the frame.
@@ -197,12 +278,13 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
     // Right after the map is created its bounds are not known yet, so wait for it to settle.
     if (map.getBounds()) frame();
     else maps.event.addListenerOnce(map, "idle", frame);
-  }, [ready, view, funded, protectedIds, theme]);
+  }, [ready, view, funded, protectedIds, theme, linkFilter, edgeIntensity, proposedIds]);
 
   return (
     <div className="map">
       <div className="map-canvas" ref={holder} role="application" aria-label="Map of businesses in the Central Market corridor" />
       {problem && <p className="map-problem">{problem}</p>}
+      {relation && <RelationshipCard relation={relation} onClose={closeRelation} />}
     </div>
   );
 }

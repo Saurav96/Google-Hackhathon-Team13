@@ -79,6 +79,18 @@ Fill in from the template: names, roles, and lanes (data, agent, front end, stor
 **2:45, close.**
 "A case, not a score. Something a grant officer can take into a meeting and defend."
 
+## Numbers agreed with the data lane
+
+- **Food service share: 21.4% of businesses** (industry codes starting with 722), against 45.5% of businesses with any cascade. Use 21.4% everywhere.
+- **We improved the footfall edge generator.** The organizers split a block's workers equally among nearby businesses. The data lane weights by distance, so nearer businesses get more. For the largest block (4,416 jobs), the flat split gave each of 9 storefronts 490.6 workers. With distance weighting, the closest (189 m) rises to 977.8 and one at the edge (431 m) falls to 115.8. Across 75 storefronts, 17 gained and 27 lost more than 15 workers. These figures come from the data lane's analysis.
+
+## What changed in the product since the first draft
+
+- The Grant Memo is now an interactive report the officer edits, with the advisor on the left.
+- The advisor proposes changes (a new split, or new wording with a before and after view). The officer applies or dismisses them.
+- Every change is a revision that can be restored. Exports (PDF and Markdown) match the exact revision on screen.
+- Links on the map are clickable and say what they are: supply or worker spending, direction, and units.
+
 ## Answers to the questions judges look for
 
 | Question | Our answer |

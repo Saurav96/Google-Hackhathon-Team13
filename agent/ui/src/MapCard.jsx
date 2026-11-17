@@ -1,4 +1,5 @@
-import { pct, roleOf } from "./api.js";
+import { useState } from "react";
+import { pct, roleOf, smallPct, usd } from "./api.js";
 import Icon from "./Icons.jsx";
 
 function verdict(c) {
@@ -11,7 +12,8 @@ function verdict(c) {
 }
 
 // The short version of a selection, shown on the map so the chat stays in view.
-export default function MapCard({ cascade, closure, onClose, onDetails, onAsk }) {
+export default function MapCard({ cascade, closure, onClose, onAsk }) {
+  const [more, setMore] = useState(false);
   if (cascade) {
     const hood = cascade.neighborhood;
     const [tone, sentence] = verdict(cascade);
@@ -35,9 +37,20 @@ export default function MapCard({ cascade, closure, onClose, onDetails, onAsk })
           <span className="tag is-modeled">Modeled: supply links</span>
         </div>
         <div className="card-actions">
-          <button type="button" className="btn" onClick={() => onAsk(`Should I fund ${cascade.seed.name}? Give me the short case.`)}>Ask the advisor</button>
-          <button type="button" className="btn is-plain" onClick={onDetails}>Full details</button>
+          <button type="button" className="btn" onClick={() => onAsk(`Should I fund ${cascade.seed.name}? Give me the short case.`)}>Discuss this business</button>
+          <button type="button" className="btn is-plain" onClick={() => setMore(!more)} aria-expanded={more}>{more ? "Less" : "More details"}</button>
         </div>
+        {more && (
+          <div className="card-more">
+            <h3>Strongest chains</h3>
+            <ul>{cascade.strongest_chains.slice(0, 5).map((ch) => (
+              <li key={ch.chain}><span>{ch.chain.replaceAll(" -> ", " → ")}</span><em>{smallPct(ch.path_strength)}</em></li>
+            ))}</ul>
+            <p className="sub">Share of the last buyer's input spending. Outside corridor alternatives are unknown.</p>
+            {cascade.duplicate_registrations.length > 0 && <p className="sub">Also registered as {cascade.duplicate_registrations.join(", ")}.</p>}
+            {cascade.sba_loans.length > 0 && <p className="sub">SBA loan on record: {cascade.sba_loans.map((l) => `${usd(l.gross_approval)} from ${l.bank_name}`).join("; ")}.</p>}
+          </div>
+        )}
       </aside>
     );
   }
@@ -60,8 +73,7 @@ export default function MapCard({ cascade, closure, onClose, onDetails, onAsk })
         <span className="tag is-modeled">Modeled: foot traffic, supply links</span>
       </div>
       <div className="card-actions">
-        <button type="button" className="btn" onClick={() => onAsk(`Employer block ${block.block_id} with ${block.jobs} jobs is leaving in 90 days. Who is exposed, and who should we contact first?`)}>Ask the advisor</button>
-        <button type="button" className="btn is-plain" onClick={onDetails}>Full details</button>
+        <button type="button" className="btn" onClick={() => onAsk(`Employer block ${block.block_id} with ${block.jobs} jobs is leaving in 90 days. Who is exposed, and who should we contact first?`)}>Discuss this closure</button>
       </div>
     </aside>
   );

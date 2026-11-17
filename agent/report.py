@@ -34,9 +34,26 @@ CELL = ParagraphStyle("cell", parent=BODY, fontSize=8.5, leading=11, spaceAfter=
 router = APIRouter()
 
 
+class Snapshot(BaseModel):
+    """The report exactly as the officer sees it. Exports are built from this, never from defaults."""
+
+    title: str = "Relief funding recommendation"
+    revision: int = 1
+    scope: str = "allocation"
+    budget_usd: int = 0
+    selection_ids: list[str] = []
+    narrative: str = ""
+    subject_id: str = ""
+    employer_block_id: str = ""
+    notes_markdown: str = ""
+    needs_update: bool = False
+
+
 class ReportRequest(BaseModel):
-    markdown: str
+    markdown: str = ""
     question: str = ""
+    snapshot: Snapshot | None = None
+    format: str = "pdf"
 
 
 def _inline(text: str) -> str:
@@ -187,7 +204,169 @@ def build(markdown: str, question: str = "") -> bytes:
     return buffer.getvalue()
 
 
+LIMITS = [
+    "Public records: business identity and address, census tract demographics, employer block job counts, SBA loan records.",
+    "Modeled: supply links (federal industry purchase rates assigned to nearby pairs) and worker spending links (block job counts shared among nearby businesses, nearer ones weighted more).",
+    "Scenario inputs: the applicant queue, the requested amounts and the budget are demo inputs, not registry data.",
+    "Reach counts businesses with a modeled link to a funded business. It is not a count of businesses saved.",
+    "No revenue, rent, jobs per business or distress data exists. A grant changes a probability, not an outcome.",
+    "Only 4 SBA loans match this corridor and none were charged off, so results cannot be checked against real failures.",
+]
+
+
+def _facts(snapshot: Snapshot) -> dict:
+    """Every number in an export, computed once for the selection and budget in the snapshot."""
+    evaluation = analysis.evaluate_selection(snapshot.selection_ids, snapshot.budget_usd)
+    subject = data.directory().get(snapshot.subject_id)
+    closing = None
+    if snapshot.employer_block_id:
+        from microgrants import closure
+
+        result = closure.simulate_employer_closure(snapshot.employer_block_id)
+        closing = None if "error" in result else result
+    return {"evaluation": evaluation, "subject": subject, "closing": closing}
+
+
+def markdown_for(snapshot: Snapshot) -> str:
+    facts = _facts(snapshot)
+    ev = facts["evaluation"]
+    lines = [
+        f"# {snapshot.title}",
+        "",
+        f"Interactive Grant Memo, revision {snapshot.revision}, {date.today():%B %d, %Y}."
+        + (" Draft: some sections need an update." if snapshot.needs_update else ""),
+        "",
+        "## 1. Recommendation",
+        "",
+        f"- Budget: ${ev['budget_usd']:,}",
+        f"- Proposed: ${ev['total_usd']:,} across {len(ev['grants'])} grants",
+        f"- Unallocated: ${ev['unallocated_usd']:,}" + (" (over budget)" if ev["over_budget"] else ""),
+        f"- Distinct businesses in modeled reach: {ev['distinct_businesses_in_reach']}",
+        "",
+    ]
+    if snapshot.narrative.strip():
+        lines += [snapshot.narrative.strip(), ""]
+    if ev["grants"]:
+        lines += ["| Business | Role | Proposed grant | Newly in modeled reach | Tract poverty |", "|---|---|---|---|---|"]
+        lines += [
+            f"| {g['name']} | {g['network_role']} | ${g['grant_usd']:,} | {g['newly_protected']} | {100 * g['tract_poverty_rate']:.1f}% |"
+            for g in ev["grants"]
+        ]
+        lines.append("")
+    else:
+        lines += ["No grants are selected in this revision.", ""]
+    if facts["subject"]:
+        c = tools.trace_cascade(facts["subject"]["business_id"])
+        lines += [
+            f"## 2. What is exposed: {facts['subject']['name']}", "",
+            f"- {c['exposed_total']} businesses in modeled reach within two steps ({c['exposed_by_hops'].get('1_hop', 0)} direct)",
+            f"- {c['exposed_not_in_applicant_queue']} of them are outside the demo applicant queue",
+            f"- Same industry peers in the corridor: {c['replaceability']['same_industry_peers_in_corridor']}. Outside corridor alternatives are unknown.",
+            "", "Strongest chains:", "",
+        ]
+        lines += [f"- {ch['chain']} ({100 * ch['path_strength']:.2f}% of buyer input spending)" for ch in c["strongest_chains"][:6]]
+        lines.append("")
+    if facts["closing"]:
+        r = facts["closing"]
+        lines += [
+            f"## Employer closure: block {r['employer_block']['block_id']}", "",
+            f"- {r['employer_block']['jobs']:,} workers leave",
+            f"- {r['first_order_total']} businesses lose modeled worker demand",
+            f"- {r['second_order_total']} suppliers behind them are exposed", "",
+        ]
+    if ev["audit"]:
+        need = ev["audit"]["need"]
+        bias = ev["audit"]["structural_bias_in_the_model"]
+        lines += [
+            "## 3. Neighborhood impact", "",
+            f"- Funded tracts average {100 * need['funded_avg_tract_poverty']:.1f}% poverty, against {100 * need['corridor_avg_tract_poverty']:.1f}% for the corridor.",
+            f"- Food service is {100 * bias['food_service_share_of_all_businesses']:.1f}% of businesses but "
+            f"{100 * bias['food_service_share_of_businesses_with_a_cascade']:.1f}% of businesses with any modeled cascade.", "",
+        ]
+    if snapshot.notes_markdown.strip():
+        lines += ["## Advisor memo", "", snapshot.notes_markdown.split("<follow_ups>")[0].strip(), ""]
+    lines += ["## Evidence and limitations", ""] + [f"- {item}" for item in LIMITS]
+    return "\n".join(lines) + "\n"
+
+
+def build_snapshot(snapshot: Snapshot) -> bytes:
+    facts = _facts(snapshot)
+    ev = facts["evaluation"]
+    story = [
+        Paragraph(escape(snapshot.title), H1),
+        Paragraph(f"Interactive Grant Memo &nbsp;&nbsp; Revision {snapshot.revision} &nbsp;&nbsp; {date.today():%B %d, %Y} &nbsp;&nbsp; "
+                  "To: Economic development officer, Central Market relief fund", SMALL),
+    ]
+    if snapshot.needs_update:
+        story.append(Paragraph("<b>Draft.</b> The inputs changed after some text was written. Review before presenting.", SMALL))
+    story.append(Table([[""]], colWidths=[WIDTH], rowHeights=[4], style=TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.2, INK)])))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("1. Recommendation", H2))
+    number = ParagraphStyle("n2", parent=BODY, fontName="Helvetica-Bold", fontSize=16, leading=19, spaceAfter=0)
+    stats = [(f"${ev['budget_usd']:,}", "budget"), (f"${ev['total_usd']:,}", "proposed"),
+             (f"${ev['unallocated_usd']:,}", "over budget" if ev["over_budget"] else "unallocated"),
+             (str(ev["distinct_businesses_in_reach"]), "businesses in modeled reach")]
+    boxes = Table([[[Paragraph(n, number), Paragraph(label, SMALL)] for n, label in stats]], colWidths=[WIDTH / 4] * 4)
+    boxes.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, LINE), ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE),
+                               ("LEFTPADDING", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]))
+    story += [boxes, Spacer(1, 8)]
+    if snapshot.narrative.strip():
+        story += _body(snapshot.narrative)
+    if ev["grants"]:
+        story.append(_table([["Business", "Role", "Proposed grant", "Newly in reach", "Tract poverty"]] + [
+            [g["name"], g["network_role"], f"${g['grant_usd']:,}", str(g["newly_protected"]), f"{100 * g['tract_poverty_rate']:.1f}%"]
+            for g in ev["grants"]
+        ]))
+        story.append(Spacer(1, 8))
+        story.append(_bars("Businesses newly in modeled reach, per grant",
+                           [(g["name"], g["newly_protected"], f"{g['newly_protected']}  (${g['grant_usd']:,})", SAFE) for g in ev["grants"]], WIDTH, 84))
+        story.append(Paragraph("Demo applicants and requested amounts. Reach is not a count of businesses saved.", SMALL))
+    else:
+        story.append(Paragraph("No grants are selected in this revision.", BODY))
+
+    if facts["subject"]:
+        story.extend(_at_a_glance(facts["subject"]))
+    if facts["closing"]:
+        r = facts["closing"]
+        story += [Paragraph("Employer closure scenario", H2),
+                  Paragraph(f"{r['employer_block']['jobs']:,} workers leave census block {r['employer_block']['block_id']}. "
+                            f"{r['first_order_total']} businesses lose modeled worker demand, and {r['second_order_total']} "
+                            "suppliers behind them are exposed.", BODY)]
+    if ev["audit"]:
+        need = ev["audit"]["need"]
+        bias = ev["audit"]["structural_bias_in_the_model"]
+        pct = lambda x: f"{100 * x:.1f}%"  # noqa: E731
+        story += [
+            Paragraph("Neighborhood impact", H2),
+            Table([[
+                _bars("Poverty rate", [("Funded tracts", need["funded_avg_tract_poverty"], pct(need["funded_avg_tract_poverty"]), ACCENT),
+                                       ("Corridor", need["corridor_avg_tract_poverty"], pct(need["corridor_avg_tract_poverty"]), SOFT)]),
+                _bars("Food service share (model bias)", [
+                    ("With a cascade", bias["food_service_share_of_businesses_with_a_cascade"], pct(bias["food_service_share_of_businesses_with_a_cascade"]), ACCENT),
+                    ("All businesses", bias["food_service_share_of_all_businesses"], pct(bias["food_service_share_of_all_businesses"]), SOFT)]),
+            ]], colWidths=[WIDTH / 2] * 2),
+        ]
+    if snapshot.notes_markdown.strip():
+        story.append(Paragraph("Advisor memo", H2))
+        story.extend(_body(snapshot.notes_markdown))
+    story.append(Paragraph("Evidence and limitations", H2))
+    story.extend(Paragraph(_inline(item), BULLET, bulletText="•") for item in LIMITS)
+
+    buffer = io.BytesIO()
+    SimpleDocTemplate(buffer, pagesize=LETTER, leftMargin=inch, rightMargin=inch, topMargin=0.8 * inch, bottomMargin=0.9 * inch,
+                      title=snapshot.title, author="Central Market relief desk").build(story, onFirstPage=_footer, onLaterPages=_footer)
+    return buffer.getvalue()
+
+
 @router.post("/api/report")
 def report(request: ReportRequest) -> Response:
+    if request.snapshot is not None:
+        name = f"grant-memo-revision-{request.snapshot.revision}"
+        if request.format == "md":
+            return Response(markdown_for(request.snapshot), media_type="text/markdown; charset=utf-8",
+                            headers={"Content-Disposition": f'attachment; filename="{name}.md"'})
+        return Response(build_snapshot(request.snapshot), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
     pdf = build(request.markdown[:60_000], request.question)
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="grant-memo.pdf"'})

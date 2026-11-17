@@ -52,7 +52,12 @@ def plan_budget(budget_usd: int = 0, include_hubs: bool = False) -> dict:
         The funding plan step by step, how it compares with funding by reach alone or with
         one large grant, and why each unfunded applicant was left out.
     """
-    budget = int(budget_usd) if budget_usd and int(budget_usd) > 0 else BUDGET_USD
+    return plan_for(int(budget_usd) if budget_usd and int(budget_usd) > 0 else BUDGET_USD, include_hubs)
+
+
+def plan_for(budget: int, include_hubs: bool = False) -> dict:
+    """The planner for an explicit budget. Zero means zero, unlike the tool's "use the default"."""
+    budget = max(0, int(budget))
     directory = data.directory()
     pool, skipped = [], []
     for applicant in APPLICANTS:
@@ -432,4 +437,43 @@ def data_health_check() -> dict:
             "With so few matched SBA loans and no charge offs, results cannot be checked "
             "against real local failures."
         ),
+    }
+
+
+def evaluate_selection(business_ids: list[str], budget_usd: int) -> dict:
+    """Totals for the grants an officer has actually ticked, in the order given.
+    Used by the report and its exports, so they describe the selection on screen.
+    """
+    directory = data.directory()
+    asks = {a["business_id"]: a["requested_usd"] for a in APPLICANTS}
+    grants, covered = [], set()
+    for business_id in dict.fromkeys(business_ids or []):
+        business = directory.get(business_id)
+        if business is None or business_id not in asks:
+            continue
+        exposed = set(data.exposed_set(business_id))
+        new = exposed - covered
+        covered |= exposed
+        grants.append(
+            {
+                "business_id": business_id,
+                "name": business["name"],
+                "grant_usd": asks[business_id],
+                "network_role": business["network_role"].split(" (")[0],
+                "cascade_reach": len(exposed),
+                "newly_protected": len(new),
+                "same_industry_peers": business["same_industry_peers"],
+                "tract_poverty_rate": business["tract_poverty_rate"],
+            }
+        )
+    total = sum(g["grant_usd"] for g in grants)
+    budget = max(0, int(budget_usd or 0))
+    return {
+        "budget_usd": budget,
+        "grants": grants,
+        "total_usd": total,
+        "unallocated_usd": budget - total,
+        "over_budget": total > budget,
+        "distinct_businesses_in_reach": len(covered),
+        "audit": equity_audit([g["business_id"] for g in grants]) if grants else None,
     }

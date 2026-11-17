@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { getJson, roleOf, usd } from "./api.js";
+import { getJson, usd } from "./api.js";
 import Chat from "./Chat.jsx";
-import { CaseDetails, ClosureDetails, Evidence } from "./Details.jsx";
+import { Evidence } from "./Details.jsx";
 import Icon from "./Icons.jsx";
-import Info from "./Info.jsx";
-import MapCard from "./MapCard.jsx";
-import MapView from "./MapView.jsx";
+import ImpactMap from "./ImpactMap.jsx";
+import { Alternatives, Neighborhood, Recommendation, Scenarios, SectionNav } from "./Report.jsx";
+import { fingerprint, SECTIONS, useReport } from "./useReport.js";
 
-const LEGEND = [
-  ["var(--closed)", "Closes"], ["var(--hop1)", "Loses a supplier"], ["var(--hop2)", "One step further"], ["var(--safe)", "Protected by a grant"],
-];
+const SECTION_NAMES = Object.fromEntries(SECTIONS);
+
+function useMedia(query) {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const m = matchMedia(query);
+    const on = () => setMatches(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, [query]);
+  return matches;
+}
 
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem("relief-desk-theme") || "light");
@@ -21,313 +30,328 @@ function useTheme() {
   return [theme, () => setTheme(theme === "dark" ? "light" : "dark")];
 }
 
-function useWide() {
-  const query = "(min-width: 1000px)";
-  const [wide, setWide] = useState(() => matchMedia(query).matches);
-  useEffect(() => {
-    const m = matchMedia(query);
-    const on = () => setWide(m.matches);
-    m.addEventListener("change", on);
-    return () => m.removeEventListener("change", on);
-  }, []);
-  return wide;
+async function download(response, fallbackName) {
+  const name = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "")?.[1] || fallbackName;
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(await response.blob());
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 export default function App() {
-  const [config, setConfig] = useState(null);
-  const [overview, setOverview] = useState(null);
-  const [nodes, setNodes] = useState([]);
+  const [boot, setBoot] = useState(null);
   const [problem, setProblem] = useState("");
-  const [mode, setMode] = useState("queue");
-  const [tab, setTab] = useState("chat");
-  const [selected, setSelected] = useState(null);
-  const [cascade, setCascade] = useState(null);
-  const [closure, setClosure] = useState(null);
-  const [budget, setBudget] = useState(50000);
-  const [plan, setPlan] = useState(null);
-  const [funded, setFunded] = useState(() => new Set());
-  const [reach, setReach] = useState(() => new Map());
-  const [outbox, setOutbox] = useState(null);
-  const [proposal, setProposal] = useState(null);
-  const [cardOpen, setCardOpen] = useState(true);
-  const latest = useRef(null);
-  const cascades = useRef(new Map());
-  const wide = useWide();
-  const [theme, toggleTheme] = useTheme();
 
   useEffect(() => {
     Promise.all([getJson("/api/config"), getJson("/api/overview"), getJson("/api/network")])
-      .then(([cfg, ov, net]) => {
-        setConfig(cfg);
-        setOverview(ov);
-        setNodes(net.nodes);
-        setBudget(ov.fund.budget_usd);
-        setPlan(ov.plan);
-        // A link can open the desk on one business: /?select=<business_id>
-        const linked = new URLSearchParams(location.search).get("select");
-        if (linked) select(linked, { toggle: false });
-        // Warm the queue's cascades in the background so a click shows its result at once.
-        ov.applicants.forEach((a) => {
-          getJson(`/api/cascade/${encodeURIComponent(a.business_id)}?hops=2`)
-            .then((c) => cascades.current.set(`${a.business_id}:2`, c)).catch(() => {});
-        });
-      })
+      .then(([config, overview, network]) => setBoot({ config, overview, network }))
       .catch((error) => setProblem(`The corridor data did not load. ${error.message} Reload the page to try again.`));
   }, []);
 
-  const applicants = overview?.applicants || [];
-  const byId = useMemo(() => new Map(applicants.map((a) => [a.business_id, a])), [applicants]);
+  if (problem) return <p className="fatal">{problem}</p>;
+  if (!boot) return <p className="fatal">Loading the corridor.</p>;
+  return <Desk {...boot} />;
+}
 
-  const loadReach = useCallback(async (id) => {
-    if (reach.has(id)) return;
-    const c = await getJson(`/api/cascade/${encodeURIComponent(id)}?hops=2`);
-    setReach((old) => new Map(old).set(id, c.exposed.map((e) => e.id)));
-  }, [reach]);
+function Desk({ config, overview, network }) {
+  const applicants = overview.applicants;
+  const knownIds = useMemo(() => new Set(applicants.map((a) => a.business_id)), [applicants]);
+  const draftSelection = useMemo(() => overview.plan.plan.map((s) => s.business_id), [overview]);
+  const { report, setBudget, toggle, setSelection, setNarrative, setNotes, restore, startOver } = useReport(overview.fund.budget_usd, knownIds, draftSelection);
+  const [theme, toggleTheme] = useTheme();
+  const wide = useMedia("(min-width: 1000px)");
 
-  const select = useCallback(async (id, { hops = 2, toggle = true } = {}) => {
-    if (!id || (toggle && latest.current === id && hops === 2)) {
+  const [mode, setModeState] = useState("queue");
+  const [selected, setSelected] = useState(null);
+  const [cascade, setCascade] = useState(null);
+  const [closure, setClosure] = useState(null);
+  const [evaluation, setEvaluation] = useState(null);
+  const [plan, setPlan] = useState(overview.plan);
+  const [reach, setReach] = useState(() => new Map());
+  const [proposals, setProposals] = useState([]);
+  const [scope, setScope] = useState(null);
+  const [outbox, setOutbox] = useState(null);
+  const [drawer, setDrawer] = useState(null);
+  const [menu, setMenu] = useState(null);
+  const [toast, setToast] = useState("");
+  const [advisorOpen, setAdvisorOpen] = useState(true);
+  const latest = useRef(null);
+  const cascades = useRef(new Map());
+  const reportRef = useRef(report);
+  reportRef.current = report;
+
+  const edgeIntensity = useMemo(() => new Map(network.edges.map((e) => [`${e.source}>${e.target}`, e.intensity])), [network]);
+
+  // Totals, reach and the audit always describe the selection and budget on screen.
+  const inputs = fingerprint(report);
+  useEffect(() => {
+    let live = true;
+    const ids = report.selection.map(encodeURIComponent).join(",");
+    getJson(`/api/evaluate?ids=${ids}&budget_usd=${report.budget}`).then((e) => { if (live) setEvaluation(e); }).catch(() => {});
+    getJson(`/api/plan?budget_usd=${report.budget}`).then((p) => { if (live) setPlan(p); }).catch(() => {});
+    return () => { live = false; };
+  }, [inputs]);
+
+  const loadCascade = useCallback(async (id, hops = 2) => {
+    const key = `${id}:${hops}`;
+    if (!cascades.current.has(key)) cascades.current.set(key, await getJson(`/api/cascade/${encodeURIComponent(id)}?hops=${hops}`));
+    return cascades.current.get(key);
+  }, []);
+
+  useEffect(() => {
+    applicants.forEach((a) => loadCascade(a.business_id).catch(() => {}));
+    const linked = new URLSearchParams(location.search).get("select");
+    if (linked) select(linked, { toggle: false });
+  }, []);
+
+  // Which businesses each selected or proposed grant reaches, for tinting the map.
+  const previewIds = useMemo(() => proposals.filter((p) => p.kind === "allocation").flatMap((p) => p.plan.plan.map((s) => s.business_id)), [proposals]);
+  useEffect(() => {
+    let live = true;
+    [...report.selection, ...previewIds].filter((id) => !reach.has(id)).forEach((id) => {
+      loadCascade(id).then((c) => { if (live) setReach((old) => new Map(old).set(id, c.exposed.map((e) => e.id))); }).catch(() => {});
+    });
+    return () => { live = false; };
+  }, [inputs, previewIds]);
+
+  const select = useCallback(async (id, { hops = 2, toggle: canToggle = true } = {}) => {
+    if (!id || (canToggle && latest.current === id && hops === 2)) {
       latest.current = null;
       setSelected(null); setCascade(null); setClosure(null);
       return;
     }
     latest.current = id;
-    setSelected(id); setClosure(null); setMode("queue"); setCardOpen(true);
-    const key = `${id}:${hops}`;
-    if (cascades.current.has(key)) return setCascade(cascades.current.get(key));
+    setSelected(id); setClosure(null); setModeState("queue");
     try {
-      const c = await getJson(`/api/cascade/${encodeURIComponent(id)}?hops=${hops}`);
-      cascades.current.set(key, c);
+      const c = await loadCascade(id, hops);
       if (latest.current === id) setCascade(c);
     } catch (error) {
-      setProblem(error.message);
+      setToast(error.message);
     }
-  }, []);
+  }, [loadCascade]);
 
-  const selectBlock = useCallback(async (blockId, { toggle = true } = {}) => {
-    if (toggle && latest.current === blockId) {
+  const selectBlock = useCallback(async (blockId, { toggle: canToggle = true } = {}) => {
+    if (canToggle && latest.current === blockId) {
       latest.current = null;
       setSelected(null); setClosure(null);
       return;
     }
     latest.current = blockId;
-    setSelected(blockId); setCascade(null); setMode("employer"); setCardOpen(true);
+    setSelected(blockId); setCascade(null); setModeState("employer");
     try {
       const r = await getJson(`/api/closure/${encodeURIComponent(blockId)}`);
       if (latest.current === blockId) setClosure(r);
     } catch (error) {
-      setProblem(error.message);
+      setToast(error.message);
     }
   }, []);
 
-  const toggleFund = useCallback((id) => {
-    setFunded((old) => {
-      const next = new Set(old);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-    loadReach(id);
-  }, [loadReach]);
+  const setMode = useCallback((next) => {
+    setModeState(next);
+    latest.current = null;
+    setSelected(null); setCascade(null); setClosure(null);
+  }, []);
 
-  const applyPlan = useCallback(async (amount) => {
-    const p = await getJson(`/api/plan?budget_usd=${Math.max(0, Math.round(amount))}`);
-    setPlan(p);
-    const ids = p.plan.map((s) => s.business_id);
-    await Promise.all(ids.map(loadReach));
-    setFunded(new Set(ids));
-  }, [loadReach]);
-
-  // The map follows the advisor: whatever it traces or plans shows up without a click.
-  const onTool = useCallback((name, args) => {
-    if (name === "trace_cascade" && args.business_id) select(args.business_id, { toggle: false });
-    if (name === "simulate_employer_closure" && args.block_id) selectBlock(args.block_id, { toggle: false });
-    if (name === "plan_budget") {
-      getJson(`/api/plan?budget_usd=${Math.round(args.budget_usd > 0 ? args.budget_usd : budget)}`).then(setProposal).catch(() => {});
-    }
-  }, [select, selectBlock, budget]);
-
-  const askAdvisor = useCallback((question) => {
-    setTab("chat");
+  const askAdvisor = useCallback((question, sectionId) => {
+    if (sectionId) setScope(sectionId);
+    setAdvisorOpen(true);
     setOutbox({ question, at: Date.now() });
   }, []);
 
+  const actions = useMemo(() => ({
+    setBudget, toggle, setNarrative,
+    setSelection: (ids, summary) => setSelection(ids, summary),
+    discuss: (sectionId) => { setScope(sectionId); setAdvisorOpen(true); setTimeout(() => document.querySelector(".composer textarea")?.focus(), 50); },
+    draft: (sectionId) => askAdvisor(
+      `Write the text for the "${SECTION_NAMES[sectionId]}" section of my report, based on the current budget and selected grants. Two to four sentences a committee can follow. Propose it as a report edit.`, sectionId),
+    useAdvisorSplit: async () => {
+      const p = await getJson(`/api/plan?budget_usd=${reportRef.current.budget}`).catch(() => null);
+      if (!p) return setToast("Could not compute the split. Try again.");
+      setSelection(p.plan.map((s) => s.business_id), `Advisor's split applied: ${p.plan.length} grants, ${usd(p.plan_total_usd)}`);
+    },
+    applyProposal: (p) => {
+      if (p.baseRevision !== reportRef.current.revision) return;
+      if (p.kind === "text") setNarrative(p.section, p.after, "advisor");
+      else setSelection(p.plan.plan.map((s) => s.business_id), `Advisor proposal applied: ${p.plan.plan.length} grants, ${usd(p.plan.plan_total_usd)}`, p.plan.budget_usd);
+      setProposals((all) => all.filter((x) => x.id !== p.id));
+      setToast("Applied. This is a new revision of the report.");
+    },
+    dismissProposal: (id) => setProposals((all) => all.filter((x) => x.id !== id)),
+  }), [setBudget, toggle, setNarrative, setSelection, askAdvisor]);
+
+  // Tool calls only move the map. Finished tool results become proposals the officer reviews.
+  const onTool = useCallback((name, args) => {
+    if (name === "trace_cascade" && args.business_id) select(args.business_id, { toggle: false });
+    if (name === "simulate_employer_closure" && args.block_id) selectBlock(args.block_id, { toggle: false });
+  }, [select, selectBlock]);
+
+  const onToolResult = useCallback((name, args, result) => {
+    const baseRevision = reportRef.current.revision;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    if (name === "plan_budget" && Array.isArray(result?.plan) && result.plan.length) {
+      const same = result.plan.length === reportRef.current.selection.length
+        && result.plan.every((s) => reportRef.current.selection.includes(s.business_id)) && result.budget_usd === reportRef.current.budget;
+      if (same) return;
+      setProposals((all) => [...all.filter((p) => p.kind !== "allocation"), {
+        id, kind: "allocation", baseRevision, plan: result,
+        summary: `Fund ${result.plan.length} grants for ${usd(result.plan_total_usd)} of a ${usd(result.budget_usd)} budget`,
+      }]);
+    }
+    if (name === "propose_report_edit" && result?.status === "proposed" && SECTION_NAMES[result.section_id]) {
+      setProposals((all) => [...all.filter((p) => !(p.kind === "text" && p.section === result.section_id)), {
+        id, kind: "text", baseRevision, section: result.section_id, after: result.new_text,
+        before: reportRef.current.narrative[result.section_id]?.text || "",
+        summary: result.summary || `New text for ${SECTION_NAMES[result.section_id]}`,
+      }]);
+      document.getElementById("sec-recommendation")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
+
+  // What the advisor is told about the report with every question.
+  const context = useMemo(() => {
+    const names = report.selection.map((id) => applicants.find((a) => a.business_id === id)?.name).filter(Boolean);
+    const lines = [
+      `Report revision ${report.revision}. Budget $${report.budget}. Use budget_usd=${report.budget} when you call plan_budget.`,
+      `Grants selected in the report: ${names.length ? names.join(", ") : "none"}.`,
+    ];
+    if (cascade) lines.push(`Business open on the map: ${cascade.seed.name} (business_id ${cascade.seed.business_id}).`);
+    if (closure) lines.push(`Employer block open on the map: ${closure.employer_block.block_id} with ${closure.employer_block.jobs} workers.`);
+    if (scope) {
+      lines.push(`The officer is discussing the "${SECTION_NAMES[scope]}" section (section_id "${scope}").`);
+      const text = report.narrative[scope]?.text;
+      if (text) lines.push(`Current text of that section: "${text}"`);
+    }
+    return lines.join(" ");
+  }, [report, cascade, closure, scope, applicants]);
+
+  const funded = useMemo(() => new Set(report.selection), [report.selection]);
   const protectedIds = useMemo(() => {
     const all = new Set();
     for (const id of funded) (reach.get(id) || []).forEach((x) => all.add(x));
     return all;
   }, [funded, reach]);
-  const committed = [...funded].reduce((sum, id) => sum + (byId.get(id)?.requested_usd || 0), 0);
+  const proposedIds = useMemo(() => new Set(previewIds.filter((id) => !funded.has(id))), [previewIds, funded]);
 
-  const view = useMemo(() => {
-    // Mark the clicked business at once, before its cascade has arrived.
-    if (selected && mode === "queue" && cascade?.seed.business_id !== selected) {
-      return { kind: "cascade", seed: selected, exposed: [], links: [] };
+  const needsUpdate = Object.values(report.narrative).some((n) => n.basis !== inputs);
+  async function exportReport(format) {
+    setMenu(null);
+    try {
+      const response = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format,
+          snapshot: {
+            revision: report.revision, budget_usd: report.budget, selection_ids: report.selection,
+            narrative: report.narrative.recommendation?.text || "", notes_markdown: report.notes,
+            subject_id: cascade?.seed.business_id || "", employer_block_id: closure?.employer_block.block_id || "",
+            scope: closure ? "employer_closure" : "allocation", needs_update: needsUpdate,
+          },
+        }),
+      });
+      if (!response.ok) throw new Error();
+      await download(response, `grant-memo.${format}`);
+      setToast(`Exported revision ${report.revision}${needsUpdate ? " as a draft" : ""}`);
+    } catch {
+      setToast("Could not export the report. Try again.");
     }
-    if (cascade) return { kind: "cascade", seed: cascade.seed.business_id, exposed: cascade.exposed, links: cascade.links };
-    if (closure?.map) return { kind: "closure", first: closure.map.first_order, second: closure.map.second_order, links: closure.map.links };
-    return null;
-  }, [cascade, closure, selected, mode]);
+  }
 
-  if (problem && !overview) return <p className="fatal">{problem}</p>;
-  if (!overview) return <p className="fatal">Loading the corridor.</p>;
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(""), 2600);
+    return () => clearTimeout(timer);
+  }, [toast]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") { setDrawer(null); setMenu(null); } };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
-  const planOrder = new Map((plan?.plan || []).map((s) => [s.business_id, s.step]));
-  const pendingName = selected && mode === "queue" && cascade?.seed.business_id !== selected
-    ? nodes.find((n) => n.id === selected)?.name : null;
-  const headline = pendingName
-    ? <>Tracing what depends on <b>{pendingName}</b></>
-    : cascade
-    ? (cascade.exposed_total
-      ? <><b>{cascade.seed.name}</b> closes. {cascade.exposed_total} businesses lose a supplier.</>
-      : <><b>{cascade.seed.name}</b> closes. No other business here buys from it.</>)
-    : closure
-      ? <><b>{closure.employer_block.jobs.toLocaleString("en-US")} workers</b> leave. {closure.first_order_total} businesses lose customers, then {closure.second_order_total} suppliers behind them.</>
-      : "Click any dot to see what happens if that business closes.";
-
-  const side = (
-    <aside className="side">
-      <div className="seg" role="tablist" aria-label="Situation">
-        <button type="button" className={mode === "queue" ? "is-on" : ""} onClick={() => { setMode("queue"); select(null); }}>Applicants</button>
-        <button type="button" className={mode === "employer" ? "is-on" : ""} onClick={() => { setMode("employer"); select(null); }}>An employer leaves</button>
+  const ctx = { overview, report, evaluation, plan, mode, setMode, actions, proposals, selected, cascade, closure, select, selectBlock };
+  const workspace = (
+    <main className="report" id="report">
+      <div className="report-inner">
+        <header className="report-head">
+          <h1>Relief funding recommendation</h1>
+          <p className="sub">Interactive Grant Memo, revision {report.revision}, saved on this device
+            {needsUpdate && <span className="state is-stale">Some text needs an update</span>}</p>
+          <SectionNav />
+        </header>
+        <Recommendation ctx={ctx} />
+        <ImpactMap ctx={ctx} config={config} nodes={network.nodes} theme={theme} funded={funded} protectedIds={protectedIds}
+          proposedIds={proposedIds} edgeIntensity={edgeIntensity} askAdvisor={askAdvisor} />
+        {mode === "queue" && <Alternatives ctx={ctx} />}
+        {mode === "queue" && <Scenarios ctx={ctx} />}
+        {mode === "queue" && <Neighborhood ctx={ctx} />}
+        <p className="report-foot">
+          <button type="button" className="link" onClick={() => setDrawer("sources")}>Sources and methodology</button>
+          {" "}Public records: businesses, census data, job counts, loans. Modeled: supply and worker spending links. A grant changes a probability, not an outcome.
+        </p>
       </div>
-      {mode === "queue" ? (
-        <>
-          <label className="budget">
-            <span>Relief budget
-              <Info label="the budget">Change the amount to match your fund. "Use the advisor's split" then picks the grants that protect the most businesses per dollar, counting each protected business once.</Info>
-            </span>
-            <span className="budget-input">$<input type="number" min="0" step="1000" value={budget}
-              onChange={(e) => setBudget(Number(e.target.value) || 0)} aria-label="Relief budget in dollars" /></span>
-          </label>
-          <div className={`meter${committed > budget ? " is-over" : ""}`}><i style={{ width: `${Math.min(100, budget ? (100 * committed) / budget : 0)}%` }} /></div>
-          <p className="side-note">
-            {funded.size
-              ? `${usd(committed)} committed. ${protectedIds.size} businesses protected, each counted once.`
-              : "Tick a business to fund it, or let the advisor split the money."}
-            {committed > budget && " This is over budget."}
-          </p>
-          <div className="side-actions">
-            <button type="button" className="btn" onClick={() => applyPlan(budget)}>Use the advisor's split</button>
-            {funded.size > 0 && <button type="button" className="btn is-plain" onClick={() => setFunded(new Set())}>Clear</button>}
-          </div>
-          <ul className="queue">
-            {applicants.map((a) => (
-              <li key={a.business_id} className={`${selected === a.business_id ? "is-selected" : ""}${funded.has(a.business_id) ? " is-funded" : ""}`}>
-                <button type="button" className="queue-main" onClick={() => select(a.business_id)}>
-                  <span className="queue-name">{a.name}</span>
-                  <span className="queue-meta">
-                    <i className={`role-dot is-${roleOf(a.network_role).split(/[ /]/)[0].toLowerCase()}`} />{roleOf(a.network_role)}, reaches {a.exposed_total}
-                    {planOrder.has(a.business_id) && <b>, advisor pick {planOrder.get(a.business_id)}</b>}
-                  </span>
-                </button>
-                <label className="queue-fund">
-                  <span>{usd(a.requested_usd)}</span>
-                  <input type="checkbox" checked={funded.has(a.business_id)} onChange={() => toggleFund(a.business_id)} aria-label={`Fund ${a.name}`} />
-                </label>
-              </li>
-            ))}
-          </ul>
-          <p className="side-note">
-            A sample queue. The city registry lists businesses, not applicants or amounts.
-            <Info label="the labels">"Reaches" is how many businesses lose a supplier within two steps if this one closes. Target Anchor: 10 to 50, the strongest case for a small grant. Ubiquitous Hub: over 80, usually the only local producer of something, so the number is inflated. Leaf Node: none.</Info>
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="side-note">Pick a block of workplaces. Nobody here has applied for anything yet.</p>
-          <ul className="queue">
-            {overview.employer_blocks.map((b) => (
-              <li key={b.block_id} className={selected === b.block_id ? "is-selected" : ""}>
-                <button type="button" className="queue-main" onClick={() => selectBlock(b.block_id)}>
-                  <span className="queue-name">{b.jobs.toLocaleString("en-US")} workers</span>
-                  <span className="queue-meta">{b.businesses_drawing_footfall} nearby businesses rely on them</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </aside>
+    </main>
   );
 
-  const stage = (
-    <section className={`stage${cardOpen && (cascade || closure) ? " has-card" : ""}`}>
-      <MapView apiKey={config.maps_api_key} nodes={nodes} view={view} funded={funded} protectedIds={protectedIds} theme={theme} reserveRight={wide && cardOpen ? 320 : 40}
-        onSelect={(id) => (id ? select(id) : select(null))} />
-      <p className="headline" aria-live="polite">{headline}</p>
-      <ul className="legend">
-        {LEGEND.map(([color, label]) => <li key={label}><i style={{ background: color }} />{label}</li>)}
-        <li><i className="ring" />In the queue</li>
-        <li><Info label="the map">Each dot is a real registered business at its real address. Lines are modeled supply links: who likely buys from whom, based on federal industry purchase rates. Click a dot to close that business, and click it again to clear.</Info></li>
-      </ul>
-      {problem && <p className="map-problem">{problem}</p>}
-      {proposal && proposal.plan.length > 0 && (
-        <div className="proposal" role="status">
-          <p><strong>The advisor proposes {proposal.plan.length} grants</strong> for {usd(proposal.plan_total_usd)}, protecting {proposal.plan_distinct_businesses_protected} businesses.</p>
-          <button type="button" className="btn" onClick={async () => {
-            setPlan(proposal);
-            const ids = proposal.plan.map((s) => s.business_id);
-            await Promise.all(ids.map(loadReach));
-            setFunded(new Set(ids));
-            setProposal(null);
-          }}>Apply this plan</button>
-          <button type="button" className="btn is-plain" onClick={() => setProposal(null)}>Dismiss</button>
-        </div>
-      )}
-      {cardOpen && !pendingName && (cascade || closure) && (
-        <MapCard cascade={cascade} closure={closure} onClose={() => setCardOpen(false)} onDetails={() => setTab("details")} onAsk={askAdvisor} />
-      )}
-    </section>
-  );
-
-  const selectedApplicant = cascade && byId.get(cascade.seed.business_id);
-  const runnerUp = (plan?.plan || []).find((s) => s.business_id !== cascade?.seed.business_id);
-  const panel = (
-    <section className="panel">
-      <div className="tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "chat"} onClick={() => setTab("chat")}>Chat <small>(grant memo)</small></button>
-        <button type="button" role="tab" aria-selected={tab === "details"} onClick={() => setTab("details")}>Details</button>
-        <button type="button" role="tab" aria-selected={tab === "evidence"} onClick={() => setTab("evidence")}>Evidence</button>
-      </div>
-      <div className="tab-body" hidden={tab !== "chat"}>
-        <Chat onTool={onTool} selectedName={cascade?.seed.name} outbox={outbox} />
-      </div>
-      {tab === "details" && (
-        <div className="tab-body is-scroll">
-          {cascade ? (
-            <CaseDetails c={cascade} ask={askAdvisor} grant={selectedApplicant?.requested_usd} compareTo={runnerUp?.business_id}
-              others={applicants.filter((a) => a.business_id !== cascade.seed.business_id && a.exposed_total > 0)}
-              setHops={(n) => select(cascade.seed.business_id, { hops: n, toggle: false })} />
-          ) : closure ? <ClosureDetails r={closure} ask={askAdvisor} />
-            : <p className="empty">Click a business on the map or in the list to see its case.</p>}
-        </div>
-      )}
-      {tab === "evidence" && <div className="tab-body is-scroll"><Evidence overview={overview} /></div>}
+  const advisor = (
+    <section className="advisor" aria-label="Advisor">
+      <Chat onTool={onTool} onToolResult={onToolResult} selectedName={cascade?.seed.name} outbox={outbox} context={context}
+        scopeName={scope ? SECTION_NAMES[scope] : null} onClearScope={() => setScope(null)}
+        onAddToReport={(text) => { setNotes(text); setToast("Added to the report as the advisor memo"); }} />
     </section>
   );
 
   return (
     <div className="app">
       <header className="bar">
-        <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M8 22L16 9l8 13" stroke="#ffb23e" strokeWidth="2" fill="none" /><circle cx="16" cy="9" r="4" fill="#ff5d73" /><circle cx="8" cy="22" r="3.4" fill="#ffb23e" /><circle cx="24" cy="22" r="3.4" fill="#3ddbb4" /></svg>
+        <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M8 22L16 9l8 13" stroke="var(--act)" strokeWidth="2" fill="none" /><circle cx="16" cy="9" r="4" fill="var(--act)" /><circle cx="8" cy="22" r="3.4" fill="var(--safe)" /><circle cx="24" cy="22" r="3.4" fill="var(--safe)" /></svg>
         <h1>Central Market relief desk</h1>
-        <p>See what each grant protects before you spend it</p>
         <div className="bar-tools">
-          <button type="button" onClick={toggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
-            <Icon name={theme === "dark" ? "sun" : "moon"} />{theme === "dark" ? "Light" : "Dark"}
-          </button>
+          <button type="button" className="is-link" onClick={() => setDrawer("sources")}><Icon name="info" />Sources and methodology</button>
+          <button type="button" onClick={() => setMenu(menu === "history" ? null : "history")} aria-expanded={menu === "history"}><Icon name="history" />Revisions</button>
+          <button type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}><Icon name={theme === "dark" ? "sun" : "moon"} /></button>
+          {!advisorOpen && wide && <button type="button" onClick={() => setAdvisorOpen(true)}><Icon name="chat" />Advisor</button>}
+          <button type="button" className="is-primary" onClick={() => setMenu(menu === "export" ? null : "export")} aria-expanded={menu === "export"}><Icon name="download" />Export</button>
+          {menu === "export" && (
+            <div className="menu" role="menu">
+              <button type="button" role="menuitem" onClick={() => exportReport("pdf")}><Icon name="print" />PDF report</button>
+              <button type="button" role="menuitem" onClick={() => exportReport("md")}><Icon name="edit" />Markdown</button>
+              <p>Exports revision {report.revision}{needsUpdate ? ", marked as a draft" : ""}</p>
+            </div>
+          )}
+          {menu === "history" && (
+            <div className="menu is-wide" role="menu">
+              <ul>{[...report.history].reverse().map((h) => (
+                <li key={h.revision}>
+                  <span><strong>Revision {h.revision}</strong> {h.summary}</span>
+                  {h.revision !== report.revision && <button type="button" onClick={() => { restore(h.revision); setMenu(null); setToast(`Restored revision ${h.revision} as a new revision`); }}>Restore</button>}
+                </li>
+              ))}</ul>
+              <button type="button" className="menu-foot" onClick={() => { startOver(); setProposals([]); setMenu(null); }}>Start a new report</button>
+            </div>
+          )}
         </div>
       </header>
+
       {wide ? (
-        <PanelGroup direction="horizontal" autoSaveId="relief-desk" className="desk">
-          <Panel defaultSize={20} minSize={14}>{side}</Panel>
-          <PanelResizeHandle className="grip" aria-label="Resize the list" />
-          <Panel defaultSize={46} minSize={25}>{stage}</Panel>
-          <PanelResizeHandle className="grip" aria-label="Resize the chat" />
-          <Panel defaultSize={34} minSize={22}>{panel}</Panel>
+        <PanelGroup direction="horizontal" autoSaveId="relief-desk-v2" className="desk">
+          {advisorOpen && <Panel defaultSize={30} minSize={22} maxSize={45} order={1} id="advisor">{advisor}</Panel>}
+          {advisorOpen && <PanelResizeHandle className="grip" aria-label="Resize the advisor" />}
+          <Panel minSize={45} order={2} id="report">{workspace}</Panel>
         </PanelGroup>
       ) : (
-        <div className="desk is-stacked">{stage}{panel}{side}</div>
+        <div className="desk is-stacked">{workspace}{advisor}</div>
       )}
+
+      {drawer === "sources" && (
+        <div className="drawer-back" onClick={() => setDrawer(null)}>
+          <aside className="drawer" role="dialog" aria-label="Sources and methodology" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="drawer-close" onClick={() => setDrawer(null)} aria-label="Close"><Icon name="close" /></button>
+            <Evidence overview={overview} />
+          </aside>
+        </div>
+      )}
+      {toast && <p className="toast is-global" role="status">{toast}</p>}
     </div>
   );
 }

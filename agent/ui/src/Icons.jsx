@@ -4,6 +4,8 @@ const PATHS = {
   download: <><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5" /><path d="M5 19h14" /></>,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   chat: <path d="M5 5h14v10H10l-5 4V5z" />,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></>,
+  add: <><path d="M6 4h9l4 4v12H6z" /><path d="M12 11v6M9 14h6" /></>,
   print: <><path d="M7 9V4h10v5" /><rect x="4" y="9" width="16" height="8" rx="2" /><path d="M7 14h10v6H7z" /></>,
   speak: <><path d="M4 10v4h3l5 4V6L7 10H4z" /><path d="M16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11" /></>,
   stop: <rect x="7" y="7" width="10" height="10" rx="1.5" />,

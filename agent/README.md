@@ -63,6 +63,12 @@ pairs of businesses is a modeling choice.
 - See industries the federal tables give few links to. Food service is 21% of businesses but 45%
   of businesses with any cascade. A business with no cascade is unseen, not unimportant.
 - The applicant queue and requested amounts are a demo scenario. The registry has neither.
+- Reports and chats are saved in the browser only ("saved on this device"). There is no login,
+  no sharing between devices, and the advisor forgets a chat's context if the service restarts.
+- Grants are all or nothing at the requested amount. There are no partial grants.
+- The split is a rule of thumb (most newly reached businesses per dollar, hubs left out), not a
+  proven best answer.
+- A workplace block's map position is approximate to its census tract and is labeled that way.
 
 ## Run it
 
@@ -79,10 +85,22 @@ python server.py          # relief desk at http://localhost:8080, ADK UI at /dev
 
 ## The screen
 
-- **Chat first.** Short answers, three suggested follow up questions after each one, and a list
-  of the tools the advisor used. Chats can be started, renamed, deleted and reopened.
-- **The map follows the advisor.** When it traces a cascade or splits the budget, the Google Map
-  shows it without a click.
+- **The Grant Memo is an interactive report.** The right side is the report: recommendation,
+  impact map, alternatives, scenarios and neighborhood. The officer edits the budget, the
+  selected grants and the text directly. Every change is a new revision that can be restored.
+- **The advisor proposes, the officer applies.** The chat sits on the left. A new split or new
+  wording from the advisor shows up in the report as a proposal with a before and after view.
+  Nothing changes until "Apply changes". A proposal made against an older revision cannot be applied.
+- **The advisor knows the report.** Each question carries the report's revision, budget, selected
+  grants and the section being discussed.
+- **Export matches the screen.** PDF and Markdown are built from the exact revision shown,
+  never from a default plan. A report with stale text is exported as a draft and says so.
+- **Links can be inspected.** Supply links (solid, supplier to buyer) and worker spending links
+  (dashed, workplace block to business) are clickable and explain their type, direction and units.
+- **The map follows the advisor.** When it traces a cascade or a closure, the Google Map shows it
+  without a click.
+- **Short answers**, three suggested follow up questions, and an Activity view with every tool
+  call, its inputs and its timing. Chats can be started, renamed, deleted and reopened.
 - **Voice.** Ask by microphone and hear a short spoken answer (Chrome and Edge).
 - **Attachments.** Drop in an application letter, photo or PDF. Gemini reads it, the advisor
   checks the business against the graph, and the file is kept in a private Cloud Storage bucket.

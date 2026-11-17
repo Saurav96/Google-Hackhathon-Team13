@@ -18,6 +18,7 @@ from .analysis import (
 )
 from .applicants import APPLICANTS
 from .closure import list_employer_blocks, simulate_employer_closure
+from .report_tools import evaluate_selection, propose_report_edit
 from .tools import (
     compare_applicants,
     find_business,
@@ -98,6 +99,20 @@ How to answer
   or a recommendation to present.
 - Any question about the queue, the applicants or "who should I fund" needs fresh tool
   results: call get_applicant_queue and compare_applicants before answering.
+
+The report
+- The officer works in an interactive report. A line starting with "[Report context" gives the
+  report's revision, budget, selected grants and the section being discussed. Treat it as the
+  current state. It overrides the default budget from get_applicant_queue.
+- You never change the report yourself. You explain, or you propose. The officer applies.
+- When asked to write, reword, shorten, clarify or add to the text of a report section, call
+  propose_report_edit with the section_id and the full new text. Keep every number exactly as
+  the tools gave it. Then say in one sentence that you proposed an edit for review.
+- When asked for a different budget or a new split, call plan_budget with that budget_usd.
+  The screen shows your plan as a proposal. Say that it is a proposal for review.
+- To describe the grants already selected in the report, call evaluate_selection with their
+  business_ids and the report budget.
+- Reach is a count of businesses with a modeled link, not a count of businesses saved.
 
 Rules
 - Never state a cascade, count, chain, rate or dollar figure that did not come from a tool.
@@ -194,6 +209,8 @@ root_agent = Agent(
         simulate_employer_closure,
         equity_audit,
         data_health_check,
+        evaluate_selection,
+        propose_report_edit,
         bigquery_mcp,
     ],
 )

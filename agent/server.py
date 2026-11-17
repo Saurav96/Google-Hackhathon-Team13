@@ -69,8 +69,16 @@ def config() -> dict:
 
 
 @app.get("/api/plan")
-def plan(budget_usd: int = 0) -> dict:
-    return analysis.plan_budget(budget_usd)
+def plan(budget_usd: int | None = None, include_hubs: bool = False) -> dict:
+    """An omitted budget means the fund's default. An explicit 0 means no money."""
+    if budget_usd is None:
+        return analysis.plan_budget(0, include_hubs)
+    return analysis.plan_for(budget_usd, include_hubs)
+
+
+@app.get("/api/evaluate")
+def evaluate(ids: str = "", budget_usd: int = 0) -> dict:
+    return analysis.evaluate_selection([i for i in ids.split(",") if i], budget_usd)
 
 
 @app.get("/api/network")
