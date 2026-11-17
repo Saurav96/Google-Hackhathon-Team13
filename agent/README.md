@@ -85,10 +85,10 @@ python server.py          # relief desk at http://localhost:8080, ADK UI at /dev
 
 ## The screen
 
-- **The Grant Memo is an interactive report.** The right side is the report: recommendation,
+- **The Grant Memo is an interactive report.** The left side, about 70 percent of the screen, is the report: recommendation,
   impact map, alternatives, scenarios and neighborhood. The officer edits the budget, the
   selected grants and the text directly. Every change is a new revision that can be restored.
-- **The advisor proposes, the officer applies.** The chat sits on the left. A new split or new
+- **The advisor proposes, the officer applies.** The chat sits on the right and can be hidden. A new split or new
   wording from the advisor shows up in the report as a proposal with a before and after view.
   Nothing changes until "Apply changes". A proposal made against an older revision cannot be applied.
 - **The advisor knows the report.** Each question carries the report's revision, budget, selected
@@ -109,10 +109,10 @@ python server.py          # relief desk at http://localhost:8080, ADK UI at /dev
 ## Test and deploy
 
 ```bash
-pip install pytest && pytest -q        # 21 integration tests against the live dataset
+pip install pytest && pytest -q        # 28 integration tests against the live dataset
 bash ../scripts/deploy.sh              # builds the screen, deploys to Cloud Run, about 5 minutes
 
-# 40 click-through checks in a real browser (needs: npm install puppeteer-core)
+# 66 click-through checks in a real browser (needs: npm install puppeteer-core)
 node ui/tests/ui_test.mjs http://localhost:8080
 ```
 

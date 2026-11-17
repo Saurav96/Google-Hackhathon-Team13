@@ -126,7 +126,7 @@ export function Recommendation({ ctx }) {
           {closure && (
             <p className="flag is-warn">
               {closure.first_order_total} businesses lose modeled worker demand and {closure.second_order_total} suppliers behind them are exposed.
-              {" "}{closure.exposed_not_in_applicant_queue} of them are outside the demo applicant queue.
+              {" "}{closure.map?.distinct_total ?? ""} distinct businesses in all, {closure.exposed_not_in_applicant_queue} of them outside the demo applicant queue.
             </p>
           )}
         </>
@@ -199,6 +199,8 @@ export function Alternatives({ ctx }) {
   const chosen = new Set(report.selection);
   const reasons = new Map((plan?.not_funded || []).map((n) => [n.name, n.reason]));
   const cmp = plan?.comparison;
+  const [outside, setOutside] = useState(null);
+  useEffect(() => { getJson("/api/screen?limit=8").then(setOutside).catch(() => {}); }, []);
   return (
     <section className="sec" aria-labelledby="sec-alternatives">
       <SectionHead number={3} id="alternatives" title="Alternatives and tradeoffs" onDiscuss={actions.discuss}
@@ -221,6 +223,27 @@ export function Alternatives({ ctx }) {
           </tbody>
         </table>
       </div>
+      {outside && outside.businesses.length > 0 && (
+        <>
+          <h3 className="sub-head">Outside the queue: who else holds others up</h3>
+          <p className="sub">The queue is only a sample. The graph covers all {Object.values(outside.corridor_roles).reduce((a, b) => a + b, 0)} businesses in the corridor.
+            These {outside.matches_total} are in the same strong band (10 to 50 reach) and are not in the queue. Nobody asked on their behalf.</p>
+          <div className="table-wrap">
+            <table className="grid">
+              <thead><tr><th scope="col">Business</th><th scope="col" className="n">Reach</th><th scope="col" className="n">Same industry peers</th><th scope="col" className="n">Tract poverty</th></tr></thead>
+              <tbody>
+                {outside.businesses.map((b) => (
+                  <tr key={b.business_id}>
+                    <td><button type="button" className="link-row" onClick={() => select(b.business_id)}>{b.name}</button></td>
+                    <td className="n">{b.cascade_reach_2hop}</td><td className="n">{b.same_industry_peers}</td><td className="n">{pct(b.tract_poverty_rate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="sub">Click a name to see it on the map. The advisor can answer about any business in the corridor, not only the queue.</p>
+        </>
+      )}
       {cmp && (
         <p className="sub">
           Funding by reach alone would pick {cmp.fund_by_reach_until_money_runs_out.grants.join(", ")} and show {cmp.fund_by_reach_until_money_runs_out.distinct_protected} businesses in reach.
@@ -344,6 +367,31 @@ export function Neighborhood({ ctx }) {
         </div>
       </div>
       <p className="sub"><span className="tag">Public record</span> Census tract demographics. Race and ethnicity are never inputs to a recommendation.</p>
+    </section>
+  );
+}
+
+const LIMITS = [
+  ["Public record", "", "Business identity and address, census tract demographics, employer block job counts, SBA loan records."],
+  ["Modeled", "is-modeled", "Supply links and worker spending links. The link types and industry rates are measured federally. Assigning them to specific pairs of businesses is a modeling choice."],
+  ["Scenario input", "is-assumption", "The applicant queue, the requested amounts, the budget, and the closure risk assumptions."],
+];
+
+export function EvidenceSection({ number, onOpen, discuss }) {
+  return (
+    <section className="sec" aria-labelledby="sec-evidence">
+      <SectionHead number={number} id="evidence" title="Evidence and limitations" onDiscuss={discuss}>
+        <button type="button" className="ghost" onClick={onOpen}><Icon name="info" size={14} />Sources and methodology</button>
+      </SectionHead>
+      <ul className="evidence">
+        {LIMITS.map(([tag, cls, text]) => <li key={tag}><span className={`tag ${cls}`}>{tag}</span><span>{text}</span></li>)}
+      </ul>
+      <ul className="plain-list">
+        <li>Reach counts businesses with a modeled link to a selected grant. It is not a count of businesses saved.</li>
+        <li>There is no revenue, rent, jobs per business or distress data. A grant changes a probability, not an outcome.</li>
+        <li>Only 4 SBA loans match this corridor and none were charged off. A charge off is a loan outcome, not proof of closure, and there are too few to test the model.</li>
+        <li>"Outside the demo queue" means not in this sample list. It says nothing about real applications.</li>
+      </ul>
     </section>
   );
 }

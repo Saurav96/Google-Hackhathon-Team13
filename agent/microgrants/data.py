@@ -147,10 +147,35 @@ def neighborhood(business: dict) -> dict:
 
 def path_links(paths: tuple[dict, ...], reverse: bool = False) -> list[dict]:
     """Distinct supplier-to-buyer links used by a traversal, with the hop they sit on."""
-    links: dict[tuple[str, str], int] = {}
+    links: dict[tuple[str, str], dict] = {}
     for row in paths:
         ids = row["chain_ids"]
         for hop, (a, b) in enumerate(zip(ids, ids[1:]), start=1):
             key = (b, a) if reverse else (a, b)
-            links[key] = min(hop, links.get(key, hop))
-    return [{"source": a, "target": b, "hop": hop} for (a, b), hop in links.items()]
+            known = links.get(key)
+            if known is None or hop < known["hop"]:
+                links[key] = {"hop": hop, "intensity": row["intensities"][hop - 1]}
+    return [
+        {
+            "id": f"supply:{a}>{b}", "source": a, "target": b, "type": "supply", "hop": link["hop"],
+            "intensity": round(link["intensity"], 4), "modeled": True,
+        }
+        for (a, b), link in links.items()
+    ]
+
+
+@lru_cache(maxsize=512)
+def worker_demand(business_id: str) -> tuple[dict, ...]:
+    """The workplace blocks whose workers are allocated to this business, largest share first."""
+    found = rows(
+        f"""
+        SELECT f.block_id, e.jobs, e.lat, e.lon, f.worker_share AS workers, f.metres,
+               SAFE_DIVIDE(f.worker_share, SUM(f.worker_share) OVER ()) AS share
+        FROM `{PROJECT}.{DATASET}.draws_footfall_from` f
+        JOIN `{PROJECT}.{DATASET}.employer_blocks` e USING (block_id)
+        WHERE f.business_id = @id
+        ORDER BY f.worker_share DESC
+        """,
+        id=business_id,
+    )
+    return tuple(found)

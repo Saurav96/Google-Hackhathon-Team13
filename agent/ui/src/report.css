@@ -152,3 +152,35 @@ table.grid input[type="checkbox"] { width: 17px; height: 17px; accent-color: var
   .bar, .advisor, .grip, .map-tools, .sec-tools, .narrative-meta, .table-head .btn { display: none !important; }
   .report { overflow: visible; height: auto; }
 }
+
+.state.is-draft, .state.is-analyzing { background: var(--raised); color: var(--soft); }
+.state.is-review { background: rgba(56, 82, 214, 0.14); color: var(--act); }
+.state.is-error { background: rgba(212, 42, 75, 0.14); color: var(--closed); }
+.report-head .state { margin-left: 10px; }
+.menu .menu-warn { border-top: 0; margin-top: 0; color: var(--hop1); max-width: 260px; }
+.chat-title small { font-weight: 400; color: var(--soft); margin-left: 6px; }
+.scope .link { font-size: 12.5px; }
+.card-grant { display: flex; justify-content: space-between; background: var(--raised); border-radius: 9px; padding: 6px 10px; margin: 8px 0 4px; font-size: 13px; }
+.evidence { display: grid; gap: 8px; margin-bottom: 12px; }
+.evidence li { display: grid; grid-template-columns: 130px 1fr; gap: 10px; font-size: 13.5px; align-items: start; }
+.evidence .tag { justify-self: start; }
+.advisor-drawer { position: fixed; inset: 0; z-index: 15; }
+.advisor-drawer .advisor { height: 100%; }
+.desk.is-stacked .advisor { height: 100%; border-top: 0; }
+@media (max-width: 999px) {
+  .sec .card { position: static; width: auto; max-height: none; margin: 0; border-radius: 0; border-inline: 0; box-shadow: none; }
+  .evidence li { grid-template-columns: 1fr; gap: 3px; }
+  .bar h1 { font-size: 15px; }
+}
+
+@media (max-width: 999px) {
+  .bar { flex-wrap: wrap; row-gap: 8px; }
+  .bar-tools { margin-left: 0; flex-wrap: wrap; }
+  .menu { left: 12px; right: 12px; top: auto; margin-top: 44px; min-width: 0; width: auto; }
+  .menu.is-wide { width: auto; }
+  .sec-head { flex-wrap: wrap; }
+  .map-tools, .chips { flex-wrap: wrap; }
+  .report-head h1 { font-size: 21px; }
+  .legend { gap: 4px 12px; }
+}
+.sec h3.sub-head { margin-top: 18px; }

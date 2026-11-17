@@ -5,7 +5,7 @@ import Chat from "./Chat.jsx";
 import { Evidence } from "./Details.jsx";
 import Icon from "./Icons.jsx";
 import ImpactMap from "./ImpactMap.jsx";
-import { Alternatives, Neighborhood, Recommendation, Scenarios, SectionNav } from "./Report.jsx";
+import { Alternatives, EvidenceSection, Neighborhood, Recommendation, Scenarios, SectionNav } from "./Report.jsx";
 import { fingerprint, SECTIONS, useReport } from "./useReport.js";
 
 const SECTION_NAMES = Object.fromEntries(SECTIONS);
@@ -69,13 +69,17 @@ function Desk({ config, overview, network }) {
   const [evaluation, setEvaluation] = useState(null);
   const [plan, setPlan] = useState(overview.plan);
   const [reach, setReach] = useState(() => new Map());
-  const [proposals, setProposals] = useState([]);
+  const [proposals, setProposals] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("relief-desk-proposals") || "[]"); } catch { return []; }
+  });
+  const [analysis, setAnalysis] = useState("analyzing");
+  const [retry, setRetry] = useState(0);
   const [scope, setScope] = useState(null);
   const [outbox, setOutbox] = useState(null);
   const [drawer, setDrawer] = useState(null);
   const [menu, setMenu] = useState(null);
   const [toast, setToast] = useState("");
-  const [advisorOpen, setAdvisorOpen] = useState(true);
+  const [advisorOpen, setAdvisorOpen] = useState(() => matchMedia("(min-width: 1000px)").matches);
   const latest = useRef(null);
   const cascades = useRef(new Map());
   const reportRef = useRef(report);
@@ -88,10 +92,17 @@ function Desk({ config, overview, network }) {
   useEffect(() => {
     let live = true;
     const ids = report.selection.map(encodeURIComponent).join(",");
-    getJson(`/api/evaluate?ids=${ids}&budget_usd=${report.budget}`).then((e) => { if (live) setEvaluation(e); }).catch(() => {});
-    getJson(`/api/plan?budget_usd=${report.budget}`).then((p) => { if (live) setPlan(p); }).catch(() => {});
+    setAnalysis("analyzing");
+    // A failed recalculation must never leave old numbers on screen looking current.
+    Promise.all([getJson(`/api/evaluate?ids=${ids}&budget_usd=${report.budget}`), getJson(`/api/plan?budget_usd=${report.budget}`)])
+      .then(([e, p]) => { if (live) { setEvaluation(e); setPlan(p); setAnalysis("ok"); } })
+      .catch(() => { if (live) { setEvaluation(null); setAnalysis("error"); } });
     return () => { live = false; };
-  }, [inputs]);
+  }, [inputs, retry]);
+
+  useEffect(() => {
+    try { localStorage.setItem("relief-desk-proposals", JSON.stringify(proposals)); } catch { /* storage full or blocked */ }
+  }, [proposals]);
 
   const loadCascade = useCallback(async (id, hops = 2) => {
     const key = `${id}:${hops}`;
@@ -152,6 +163,9 @@ function Desk({ config, overview, network }) {
     latest.current = null;
     setSelected(null); setCascade(null); setClosure(null);
   }, []);
+
+  // Applicants with their requested amounts, so cards can show a grant only for a real applicant.
+  const asks = useMemo(() => new Map(applicants.map((a) => [a.business_id, a.requested_usd])), [applicants]);
 
   const askAdvisor = useCallback((question, sectionId) => {
     if (sectionId) setScope(sectionId);
@@ -234,6 +248,9 @@ function Desk({ config, overview, network }) {
   const proposedIds = useMemo(() => new Set(previewIds.filter((id) => !funded.has(id))), [previewIds, funded]);
 
   const needsUpdate = Object.values(report.narrative).some((n) => n.basis !== inputs);
+  const status = analysis === "error" ? ["error", "Error"] : analysis === "analyzing" ? ["analyzing", "Analyzing"]
+    : proposals.length ? ["review", "Review changes"] : needsUpdate ? ["stale", "Needs update"]
+    : report.revision === 1 ? ["draft", "Draft"] : ["current", "Current"];
   async function exportReport(format) {
     setMenu(null);
     try {
@@ -268,6 +285,13 @@ function Desk({ config, overview, network }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  // A click anywhere outside an open menu closes it.
+  useEffect(() => {
+    if (!menu) return undefined;
+    const onDown = (e) => { if (!e.target.closest(".bar-tools")) setMenu(null); };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [menu]);
 
   const ctx = { overview, report, evaluation, plan, mode, setMode, actions, proposals, selected, cascade, closure, select, selectBlock };
   const workspace = (
@@ -276,19 +300,20 @@ function Desk({ config, overview, network }) {
         <header className="report-head">
           <h1>Relief funding recommendation</h1>
           <p className="sub">Interactive Grant Memo, revision {report.revision}, saved on this device
-            {needsUpdate && <span className="state is-stale">Some text needs an update</span>}</p>
+            <span className={`state is-${status[0]}`} title="Current means the text and numbers match the inputs. It does not mean approved or funded.">{status[1]}</span></p>
+          {analysis === "error" && (
+            <p className="flag is-warn">The numbers could not be recalculated, so none are shown. Your edits are kept.
+              {" "}<button type="button" className="link" onClick={() => setRetry(retry + 1)}>Try again</button></p>
+          )}
           <SectionNav />
         </header>
         <Recommendation ctx={ctx} />
         <ImpactMap ctx={ctx} config={config} nodes={network.nodes} theme={theme} funded={funded} protectedIds={protectedIds}
-          proposedIds={proposedIds} edgeIntensity={edgeIntensity} askAdvisor={askAdvisor} />
+          proposedIds={proposedIds} edgeIntensity={edgeIntensity} askAdvisor={askAdvisor} asks={asks} narrow={!wide} />
         {mode === "queue" && <Alternatives ctx={ctx} />}
         {mode === "queue" && <Scenarios ctx={ctx} />}
         {mode === "queue" && <Neighborhood ctx={ctx} />}
-        <p className="report-foot">
-          <button type="button" className="link" onClick={() => setDrawer("sources")}>Sources and methodology</button>
-          {" "}Public records: businesses, census data, job counts, loans. Modeled: supply and worker spending links. A grant changes a probability, not an outcome.
-        </p>
+        <EvidenceSection number={mode === "queue" ? 6 : 3} onOpen={() => setDrawer("sources")} discuss={actions.discuss} />
       </div>
     </main>
   );
@@ -296,7 +321,7 @@ function Desk({ config, overview, network }) {
   const advisor = (
     <section className="advisor" aria-label="Advisor">
       <Chat onTool={onTool} onToolResult={onToolResult} selectedName={cascade?.seed.name} outbox={outbox} context={context}
-        scopeName={scope ? SECTION_NAMES[scope] : null} onClearScope={() => setScope(null)}
+        scopeName={scope ? SECTION_NAMES[scope] : null} onClearScope={() => setScope(null)} onHide={() => setAdvisorOpen(false)}
         onAddToReport={(text) => { setNotes(text); setToast("Added to the report as the advisor memo"); }} />
     </section>
   );
@@ -310,12 +335,16 @@ function Desk({ config, overview, network }) {
           <button type="button" className="is-link" onClick={() => setDrawer("sources")}><Icon name="info" />Sources and methodology</button>
           <button type="button" onClick={() => setMenu(menu === "history" ? null : "history")} aria-expanded={menu === "history"}><Icon name="history" />Revisions</button>
           <button type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}><Icon name={theme === "dark" ? "sun" : "moon"} /></button>
-          {!advisorOpen && wide && <button type="button" onClick={() => setAdvisorOpen(true)}><Icon name="chat" />Advisor</button>}
+          <button type="button" onClick={() => setAdvisorOpen(!advisorOpen)} aria-pressed={advisorOpen}><Icon name="chat" />{advisorOpen ? "Hide advisor" : "Advisor"}</button>
           <button type="button" className="is-primary" onClick={() => setMenu(menu === "export" ? null : "export")} aria-expanded={menu === "export"}><Icon name="download" />Export</button>
           {menu === "export" && (
             <div className="menu" role="menu">
               <button type="button" role="menuitem" onClick={() => exportReport("pdf")}><Icon name="print" />PDF report</button>
               <button type="button" role="menuitem" onClick={() => exportReport("md")}><Icon name="edit" />Markdown</button>
+              {needsUpdate && (
+                <p className="menu-warn">Some text was written before the last change. Update it first, or it is exported as a draft.
+                  {" "}<button type="button" className="link" onClick={() => { setMenu(null); document.querySelector(".state.is-stale")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>Show me</button></p>
+              )}
               <p>Exports revision {report.revision}{needsUpdate ? ", marked as a draft" : ""}</p>
             </div>
           )}
@@ -334,13 +363,17 @@ function Desk({ config, overview, network }) {
       </header>
 
       {wide ? (
-        <PanelGroup direction="horizontal" autoSaveId="relief-desk-v2" className="desk">
-          {advisorOpen && <Panel defaultSize={30} minSize={22} maxSize={45} order={1} id="advisor">{advisor}</Panel>}
+        <PanelGroup direction="horizontal" autoSaveId="relief-desk-v3" className="desk">
+          <Panel minSize={45} order={1} id="report">{workspace}</Panel>
           {advisorOpen && <PanelResizeHandle className="grip" aria-label="Resize the advisor" />}
-          <Panel minSize={45} order={2} id="report">{workspace}</Panel>
+          {advisorOpen && <Panel defaultSize={29} minSize={22} maxSize={45} order={2} id="advisor">{advisor}</Panel>}
         </PanelGroup>
       ) : (
-        <div className="desk is-stacked">{workspace}{advisor}</div>
+        // On small screens the report is the page and the advisor slides over it.
+        <div className="desk is-stacked">
+          {workspace}
+          {advisorOpen && <div className="advisor-drawer">{advisor}</div>}
+        </div>
       )}
 
       {drawer === "sources" && (

@@ -85,7 +85,7 @@ export default function MapView({
         markers.set(n.id, { marker, node: n, position });
       }
       map.fitBounds(bounds, 24);
-      const c = { maps, map, markers, lines: [], timers: [], all: bounds, framed: null, origin: null, linkClickAt: 0 };
+      const c = { maps, map, markers, lines: [], timers: [], all: bounds, framed: null, origin: null, blocks: [], linkClickAt: 0 };
       map.addListener("click", () => {
         setRelation(null);
         // A click on a link must not also clear the selected business.
@@ -116,6 +116,8 @@ export default function MapView({
     c.timers = [];
     c.lines = [];
     if (c.origin) { c.origin.setMap(null); c.origin = null; }
+    c.blocks.forEach((b) => b.setMap(null));
+    c.blocks = [];
 
     const state = new Map();
     const labels = new Set();
@@ -223,8 +225,31 @@ export default function MapView({
       }
     };
 
+    // For one business: the workplace blocks whose workers are allocated to it.
+    const drawInbound = () => {
+      const seed = markers.get(view.seed);
+      if (!showWorker || !seed) return;
+      for (const w of view.inbound || []) {
+        if (!Number.isFinite(w.lat) || !Number.isFinite(w.lon)) continue;
+        const position = { lat: w.lat, lng: w.lon };
+        c.blocks.push(new maps.Marker({
+          map, position, zIndex: 25, clickable: false,
+          title: `Workplace block, ${Number(w.jobs).toLocaleString("en-US")} workers. Approximate location.`,
+          icon: { path: SQUARE, scale: 6, fillColor: COLORS.block, fillOpacity: 1, strokeColor: COLORS.queue, strokeWeight: 1.5 },
+        }));
+        addLine(position, seed.position, {
+          strokeOpacity: 0,
+          icons: [
+            { icon: { path: "M 0,-1 0,1", strokeColor: COLORS.worker, strokeOpacity: 0.9, strokeWeight: 2, scale: 2.2 }, offset: "0", repeat: "11px" },
+            arrow(COLORS.worker, 1.8),
+          ],
+        }, { type: "worker", targetName: seed.node.name, workers: w.workers, share: w.share });
+      }
+    };
+
     const drawAll = () => {
       if (view?.kind === "cascade") {
+        drawInbound();
         drawSupply(view.links.filter((l) => l.hop === 1), false);
         drawSupply(view.links.filter((l) => l.hop > 1), true);
       } else if (view) {
@@ -243,6 +268,7 @@ export default function MapView({
     } else {
       paint(0);
       if (view.kind === "cascade") {
+        drawInbound();
         drawSupply(view.links.filter((l) => l.hop === 1), false);
         c.timers.push(setTimeout(() => {
           paint(1);

@@ -11,6 +11,7 @@ export const SECTIONS = [
   ["alternatives", "Alternatives"],
   ["scenarios", "Scenarios"],
   ["neighborhood", "Neighborhood"],
+  ["evidence", "Evidence"],
 ];
 
 // A new report opens on the computed split, so there is something real to explore at once.

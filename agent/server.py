@@ -76,6 +76,12 @@ def plan(budget_usd: int | None = None, include_hubs: bool = False) -> dict:
     return analysis.plan_for(budget_usd, include_hubs)
 
 
+@app.get("/api/screen")
+def screen(limit: int = 8) -> dict:
+    """Businesses across the whole corridor that hold others up but are not in the queue."""
+    return analysis.screen_corridor("Target Anchor", True, limit)
+
+
 @app.get("/api/evaluate")
 def evaluate(ids: str = "", budget_usd: int = 0) -> dict:
     return analysis.evaluate_selection([i for i in ids.split(",") if i], budget_usd)
@@ -87,6 +93,8 @@ def network() -> dict:
     nodes = [
         {
             "id": b["business_id"],
+            "kind": "business",
+            "provenance": "City of San Francisco business registry",
             "name": b["name"],
             "address": b["address"],
             "lat": b["latitude"],
@@ -100,7 +108,20 @@ def network() -> dict:
         }
         for b in data.directory().values()
     ]
-    return {"nodes": nodes, "edges": _supply_edges()}
+    return {"nodes": nodes, "edges": _supply_edges(), "workplace_blocks": _workplace_blocks()}
+
+
+@lru_cache(maxsize=1)
+def _workplace_blocks() -> list[dict]:
+    """Census blocks with real job counts. Their coordinates are approximate to the tract."""
+    return [
+        {
+            "id": f"block:{b['block_id']}", "kind": "workplace_block", "block_id": b["block_id"], "jobs": b["jobs"],
+            "lat": b["lat"], "lon": b["lon"], "locationPrecision": "census tract, approximate",
+            "provenance": "Census LEHD job counts",
+        }
+        for b in data.rows(f"SELECT block_id, jobs, lat, lon FROM `{data.PROJECT}.{data.DATASET}.employer_blocks` ORDER BY jobs DESC")
+    ]
 
 
 @app.get("/api/cascade/{business_id}")
@@ -117,6 +138,17 @@ def cascade(business_id: str, hops: int = 2) -> dict:
             for e in exposed.values()
         ],
         "links": data.path_links(paths),
+        # Worker spending into this business: the blocks it draws weekday customers from.
+        "worker_links": [
+            {
+                "id": f"worker:{w['block_id']}>{business_id}", "type": "worker_spending", "block_id": w["block_id"],
+                "jobs": w["jobs"], "lat": w["lat"], "lon": w["lon"], "workers": round(w["workers"], 1),
+                "share": round(w["share"] or 0, 3), "metres": round(w["metres"]), "modeled": True,
+                "locationPrecision": "census tract, approximate",
+            }
+            for w in data.worker_demand(business_id)[:4]
+        ],
+        "worker_blocks_total": len(data.worker_demand(business_id)),
     }
 
 

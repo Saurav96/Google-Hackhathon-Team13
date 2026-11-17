@@ -154,3 +154,61 @@ def test_tables_behind_the_graph_are_healthy():
     health = analysis.data_health_check()
     assert health["passed"], health["problems"]
     assert health["businesses_without_a_census_tract"] == 0
+
+
+def test_zero_budget_means_zero_but_the_tool_default_still_works():
+    assert analysis.plan_for(0)["budget_usd"] == 0 and analysis.plan_for(0)["plan"] == []
+    assert analysis.plan_budget(0)["budget_usd"] == BUDGET_USD
+
+
+def test_evaluating_a_selection_never_double_counts_and_respects_the_budget():
+    result = analysis.evaluate_selection([SPEED_QUEEN, MICROBIZ, SPEED_QUEEN, "nope"], 15_000)
+    assert [g["business_id"] for g in result["grants"]] == [SPEED_QUEEN, MICROBIZ]
+    union = set(data.exposed_set(SPEED_QUEEN)) | set(data.exposed_set(MICROBIZ))
+    assert result["distinct_businesses_in_reach"] == len(union)
+    assert result["total_usd"] == 18_000 and result["over_budget"] and result["unallocated_usd"] == -3_000
+    empty = analysis.evaluate_selection([], 50_000)
+    assert empty["grants"] == [] and empty["audit"] is None and empty["unallocated_usd"] == 50_000
+
+
+def test_traversal_links_are_typed_and_carry_their_intensity():
+    links = data.path_links(data.walk(SPEED_QUEEN, 2, "downstream"))
+    assert links and all(l["type"] == "supply" and 0 < l["intensity"] < 1 and l["hop"] in (1, 2) for l in links)
+    assert len({l["id"] for l in links}) == len(links)
+    assert all(l["source"] == SPEED_QUEEN for l in links if l["hop"] == 1)
+
+
+def test_worker_demand_shares_sum_to_one():
+    blocks = data.worker_demand("0911744-65-001")
+    assert blocks and abs(sum(b["share"] for b in blocks) - 1) < 1e-6
+    assert data.worker_demand("nope") == ()
+
+
+def test_closure_counts_distinct_businesses_not_a_sum():
+    block = closure.list_employer_blocks(1)["employer_blocks"][0]["block_id"]
+    result = closure.simulate_employer_closure(block)
+    view = closure.map_view(block)
+    assert view["distinct_total"] <= result["first_order_total"] + result["second_order_total"]
+    assert view["origin"]["jobs"] == result["employer_block"]["jobs"] and len(view["footfall"]) == result["first_order_total"]
+
+
+def test_report_edit_proposals_are_validated_and_never_apply_anything():
+    from microgrants import report_tools
+
+    ok = report_tools.propose_report_edit("recommendation", "Fund four anchors.", "Clarify")
+    assert ok == {"status": "proposed", "section_id": "recommendation", "new_text": "Fund four anchors.", "summary": "Clarify"}
+    assert "error" in report_tools.propose_report_edit("no_such_section", "x", "y")
+    assert "error" in report_tools.propose_report_edit("recommendation", "  ", "y")
+    assert "error" in report_tools.propose_report_edit("recommendation", "x" * 2000, "y")
+    assert "error" in report_tools.evaluate_selection(["nope"], 1000)
+
+
+def test_export_uses_the_snapshot_not_the_default_plan():
+    import report
+
+    snapshot = report.Snapshot(revision=4, budget_usd=20_000, selection_ids=[SPEED_QUEEN], narrative="Officer text.")
+    text = report.markdown_for(snapshot)
+    assert "$20,000" in text and "$8,000" in text and "Officer text." in text and "revision 4" in text
+    assert "$33,000" not in text and "$50,000" not in text
+    assert report.build_snapshot(snapshot)[:5] == b"%PDF-"
+    assert "Draft" in report.markdown_for(report.Snapshot(needs_update=True))

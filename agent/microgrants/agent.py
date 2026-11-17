@@ -108,8 +108,9 @@ The report
 - When asked to write, reword, shorten, clarify or add to the text of a report section, call
   propose_report_edit with the section_id and the full new text. Keep every number exactly as
   the tools gave it. Then say in one sentence that you proposed an edit for review.
-- When asked for a different budget or a new split, call plan_budget with that budget_usd.
-  The screen shows your plan as a proposal. Say that it is a proposal for review.
+- When asked for a different budget or a new split, call plan_budget with that budget_usd,
+  every time, even if you already have an earlier result. Only a fresh call puts a proposal
+  on the officer's screen. Say that it is a proposal for review.
 - To describe the grants already selected in the report, call evaluate_selection with their
   business_ids and the report budget.
 - Reach is a count of businesses with a modeled link, not a count of businesses saved.

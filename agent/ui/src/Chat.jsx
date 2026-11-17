@@ -116,7 +116,7 @@ function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity
   );
 }
 
-export default function Chat({ onTool, onToolResult, selectedName, outbox, context, scopeName, onClearScope, onAddToReport }) {
+export default function Chat({ onTool, onToolResult, selectedName, outbox, context, scopeName, onClearScope, onAddToReport, onHide }) {
   const { chats, active, open, start, rename, remove, update } = useChats();
   const messages = active.messages;
   const [overlay, setOverlay] = useState(null);
@@ -136,11 +136,16 @@ export default function Chat({ onTool, onToolResult, selectedName, outbox, conte
   useEffect(() => {
     if (pinned.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [messages]);
+  // Opening a chat, or reloading the page, lands on the newest message. Long answers settle
+  // their height a moment after first paint, so the jump is repeated until they have.
   useEffect(() => {
     pinned.current = true;
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+    const toBottom = () => { if (pinned.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight }); };
+    toBottom();
+    const timers = [50, 250, 800].map((ms) => setTimeout(toBottom, ms));
     stopSpeaking();
     setSpeakingId(null);
+    return () => timers.forEach(clearTimeout);
   }, [active.id]);
 
   useEffect(() => {
@@ -152,6 +157,14 @@ export default function Chat({ onTool, onToolResult, selectedName, outbox, conte
     const timer = setTimeout(() => setToast(""), 2200);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // History and Activity close when the officer clicks anywhere else.
+  useEffect(() => {
+    if (!overlay) return undefined;
+    const onDown = (e) => { if (!e.target.closest(".sheet-over, .chat-head")) setOverlay(null); };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [overlay]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") setOverlay(null); };
@@ -257,13 +270,14 @@ export default function Chat({ onTool, onToolResult, selectedName, outbox, conte
   return (
     <div className="chat">
       <div className="chat-head">
-        <span className="chat-title" title={active.title}>{active.title}</span>
+        <span className="chat-title" title={active.title}>Advisor <small>{active.title}</small></span>
         <button type="button" onClick={() => setOverlay(overlay === "activity" ? null : "activity")} aria-expanded={overlay === "activity"}
           title="Tools, timings and inputs behind each answer"><Icon name="activity" size={14} />Activity</button>
         <button type="button" onClick={() => setOverlay(overlay === "history" ? null : "history")} aria-expanded={overlay === "history"}>
           <Icon name="history" size={14} />History{asked > 0 && ` (${asked})`}
         </button>
         <button type="button" className="is-strong" onClick={() => { start(); setOverlay(null); }} disabled={busy}><Icon name="plus" size={14} />New chat</button>
+        {onHide && <button type="button" onClick={onHide} aria-label="Hide the advisor" title="Hide the advisor"><Icon name="close" size={14} /></button>}
       </div>
       {overlay === "history" && (
         <History chats={chats} activeId={active.id} onOpen={open} onRename={rename}
@@ -307,7 +321,7 @@ export default function Chat({ onTool, onToolResult, selectedName, outbox, conte
         {scopeName && (
           <p className="scope">
             <Icon name="chat" size={13} />Discussing: {scopeName}
-            <button type="button" onClick={onClearScope} aria-label="Discuss the whole report instead" title="Discuss the whole report"><Icon name="close" size={13} /></button>
+            <button type="button" className="link" onClick={onClearScope}>Discuss whole report</button>
           </p>
         )}
         {selectedName && messages.length > 0 && !busy && (

@@ -52,13 +52,15 @@ try {
 
   // First open.
   check("opens on the interactive report", (await text(".report-head h1")).includes("Relief funding recommendation"));
-  check("chat is on the left, report on the right", await page.evaluate(() => document.querySelector(".advisor").getBoundingClientRect().left < document.querySelector(".report").getBoundingClientRect().left));
+  check("report is on the left and wider, advisor on the right", await page.evaluate(() => { const r = document.querySelector(".report").getBoundingClientRect(), a = document.querySelector(".advisor").getBoundingClientRect(); return r.left < a.left && r.width > 2 * a.width; }));
+  await until(() => document.querySelector(".report-head .state")?.innerText !== "Analyzing", 15000);
+  check("the report shows its state", (await text(".report-head .state")) === "Draft", await text(".report-head .state"));
   check("no details or evidence tabs", await page.$(".tabs") === null);
   await until(() => document.querySelectorAll(".stats strong")[1]?.innerText === "$33,000", 15000);
   check("a draft is ready without asking the advisor", (await stat("Proposed")) === "$33,000" && (await stat("Modeled reach")) === "105", `${await stat("Proposed")} / ${await stat("Modeled reach")}`);
   check("the draft is labeled as a draft", (await text(".sec")).includes("Draft"));
   check("sample applicants are labeled as demo inputs", (await text(".table-head")).includes("Demo applicants"));
-  check("five report sections are present", (await page.$$(".sec")).length === 5);
+  check("six report sections are present", (await page.$$(".sec")).length === 6);
   check("google map rendered", await until(() => document.querySelector(".map-canvas")?.childElementCount > 0, 20000));
   check("favicon present", await page.$('link[rel="icon"]') !== null);
   await shot("report");
@@ -104,8 +106,9 @@ try {
   // Map, card and links.
   await clickText(".link-row", "Speed Queen");
   check("selecting a business shows its cascade", await until(() => document.querySelector(".headline")?.innerText.includes("39 businesses"), 15000), await text(".headline"));
-  check("a card opens on the map", (await text(".card")).includes("never applied") && (await text(".card")).includes("Public record"));
+  check("a card opens on the map", (await text(".card")).includes("outside the demo queue") && (await text(".card")).includes("Requested grant") && (await text(".card")).includes("Public record"));
   check("the chat stays visible", await page.$(".composer textarea") !== null);
+  check("links are also available as a list", await page.$$eval("summary", (n) => n.some((e) => e.innerText.includes("Every link in this view"))));
   await clickText(".card .btn", "More details");
   check("the card expands for chains", (await text(".card-more")).includes("→"));
   await page.select(".steps-pick select", "1");
@@ -124,7 +127,8 @@ try {
   await page.waitForSelector(".blocks button");
   await (await page.$(".blocks button")).click();
   check("employer closure shows shops then suppliers", await until(() => document.querySelector(".headline")?.innerText.includes("suppliers behind them"), 20000), await text(".headline"));
-  check("allocation sections are hidden for a closure", (await page.$$(".sec")).length === 2);
+  check("allocation sections are hidden for a closure", (await page.$$(".sec")).length === 3);
+  check("closure links are listed for keyboard users", await clickText("summary", "Every link in this view") && (await text(".report")).includes("workers allocated"));
   await page.evaluate(() => document.getElementById("sec-impact").scrollIntoView());
   await sleep(1800);
   await shot("employer");
@@ -133,7 +137,8 @@ try {
   await page.waitForSelector("table.grid tbody tr");
 
   // Other sections.
-  check("alternatives compares every applicant", (await page.$$eval("#sec-alternatives", () => document.querySelectorAll(".sec")[2].querySelectorAll("tbody tr").length)) === 11);
+  check("alternatives compares every applicant", (await page.$$eval(".sec", (s) => s[2].querySelector("table").querySelectorAll("tbody tr").length)) === 11);
+  check("businesses outside the queue are listed from the whole corridor", await until(() => document.querySelectorAll(".sec")[2]?.innerText.includes("Outside the queue"), 8000));
   check("scenarios show stated assumptions", await until(() => document.querySelectorAll(".sec")[3]?.innerText.includes("Cautious"), 10000));
   check("neighborhood audit reflects the selection", (await page.$$eval(".sec", (s) => s[4].innerText)).includes("Funded, poverty"));
 
@@ -148,7 +153,7 @@ try {
   await clickText(".proposal-actions .btn", "Dismiss");
   await sleep(300);
   check("a proposal can be dismissed", await page.$(".proposal-card") === null && (await stat("Proposed")) === selectionBefore);
-  check("advisor proposes again on request", await askAndWait("Propose the split for a 20,000 dollar budget again.") && await until(() => document.querySelector(".proposal-card"), 8000));
+  check("advisor proposes again on request", await askAndWait("Propose the split for a 20,000 dollar budget again.") && await until(() => document.querySelector(".proposal-list"), 8000));
   await clickText(".proposal-actions .btn", "Apply changes");
   await sleep(1500);
   check("applying a proposal updates the whole report", (await stat("Budget")).startsWith("$20,000") && (await stat("Proposed")) !== selectionBefore, `${await stat("Budget")} / ${await stat("Proposed")}`);
@@ -179,6 +184,14 @@ try {
   check("PDF export works", exported.pdf.status === 200 && exported.pdf.type.includes("pdf") && exported.pdf.body > 2000, `${exported.pdf.body} bytes`);
   check("Markdown export matches the report, not the default plan", exported.md.status === 200 && exported.md.body.includes("$20,000") && exported.md.body.includes("$8,000") && !exported.md.body.includes("$33,000"));
   await clickText(".bar-tools button", "Export");
+  await page.mouse.click(500, 500);
+  await sleep(200);
+  check("a menu closes when you click outside it", await page.$(".menu") === null);
+  await clickText(".bar-tools button", "Revisions");
+  await page.mouse.click(500, 500);
+  await sleep(200);
+  check("the revisions menu closes the same way", await page.$(".menu") === null);
+  await clickText(".bar-tools button", "Export");
   check("export menu offers PDF and Markdown", (await text(".menu")).includes("PDF report") && (await text(".menu")).includes("Markdown") && (await text(".menu")).includes("revision"));
   await clickText(".menu button", "Markdown");
   check("exporting confirms the revision", await until(() => document.querySelector(".toast")?.innerText.includes("Exported revision"), 8000), await text(".toast"));
@@ -188,12 +201,20 @@ try {
   check("copy shows a confirmation", await until(() => [...document.querySelectorAll(".toast")].some((t) => t.innerText.includes("Copied")), 3000));
   await clickText(".chat-head button", "Activity");
   check("activity lists tools and timings", await until(() => /[0-9] s/.test(document.querySelector(".activity")?.innerText || ""), 5000));
-  await clickText(".sheet-head button", "Close");
+  await page.mouse.click(500, 500);
+  await sleep(200);
+  check("activity closes when you click outside it", await page.$(".sheet-over") === null);
   await clickText(".chat-head button", "New chat");
   await page.waitForSelector(".welcome");
   check("a new chat keeps the report", (await stat("Budget")).startsWith("$20,000"));
   await clickText(".chat-head button", "History");
   check("chat history lists the earlier chat", (await page.$$(".history li")).length >= 1);
+  await (await page.$(".history-open")).click();
+  await page.reload({ waitUntil: "networkidle2" });
+  await sleep(1200);
+  check("after a reload the chat sits at its newest message", await page.evaluate(() => { const el = document.querySelector(".chat-scroll"); return el.scrollHeight - el.scrollTop - el.clientHeight < 40; }));
+  await clickText(".chat-head button", "New chat");
+  await clickText(".chat-head button", "History");
   await clickText(".sheet-head button", "Close");
   await page.type(".composer textarea", "Write the full grant memo for the grants selected in my report.");
   await page.keyboard.press("Enter");
@@ -213,6 +234,11 @@ try {
   await shot("dark");
   await (await page.$('.bar-tools button[aria-label^="Switch to"]')).click();
   check("a resize handle exists", (await page.$$(".grip")).length === 1);
+  await clickText(".bar-tools button", "Hide advisor");
+  await sleep(300);
+  check("the advisor can be hidden and the report widens", await page.$(".advisor") === null && await page.evaluate(() => document.querySelector(".report").getBoundingClientRect().width > 1300));
+  await clickText(".bar-tools button", "Advisor");
+  await sleep(300);
   for (const [w, h] of [[1024, 768], [390, 844]]) {
     await page.setViewport({ width: w, height: h });
     await sleep(900);
