@@ -14,7 +14,6 @@ const browser = await puppeteer.launch({
   executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   headless: "new", defaultViewport: { width: 1500, height: 950 },
 });
-await browser.defaultBrowserContext().overridePermissions(new URL(BASE).origin, ["clipboard-read", "clipboard-write"]);
 const page = await browser.newPage();
 page.on("console", (m) => { if (m.type() === "error") errors.push(m.text().slice(0, 200)); });
 page.on("pageerror", (e) => errors.push("PAGEERROR " + e.message.slice(0, 200)));
