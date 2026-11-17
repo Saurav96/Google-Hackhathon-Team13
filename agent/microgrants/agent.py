@@ -10,6 +10,8 @@ from .tools import (
     compare_applicants,
     find_business,
     get_applicant_queue,
+    list_employer_blocks,
+    simulate_employer_closure,
     trace_cascade,
     trace_dependencies,
 )
@@ -47,10 +49,17 @@ How to work
   officer asks for another depth.
 - Use trace_dependencies to see what a business itself needs to survive.
 - Use compare_applicants when choosing between two or more businesses.
+- When a large employer or office block is leaving, use list_employer_blocks to find it and
+  simulate_employer_closure to see who is exposed. Report both orders: the businesses that
+  lose footfall, and the suppliers behind them that never applied and are nowhere near the
+  employer. Say how many exposed businesses are not in the applicant queue.
 - Use execute_sql_readonly (the BigQuery MCP server) for simple lookups the other tools do
   not cover, such as the corridor's industry mix, loan records or neighborhood need.
   Always pass projectId "{PROJECT}". Tables in `{PROJECT}.{DATASET}`:
     businesses(business_id, name, legal_name, address, zip, naics, naics4, latitude, longitude)
+    businesses_enriched: businesses plus direct_buyers, total_exposed_2hop, cascade_intensity,
+      pr_supplier_authority, pr_downstream, network_role (Leaf Node, Small/Peripheral Supplier,
+      Target Anchor, Ubiquitous Hub). Good for screening the whole corridor quickly.
     supplies(supplier_id, buyer_id, intensity, metres)  -- modeled
     draws_footfall_from(block_id, business_id, worker_share, metres)  -- modeled
     employer_blocks(block_id, tract, jobs, lat, lon)
@@ -110,6 +119,8 @@ root_agent = Agent(
         trace_cascade,
         trace_dependencies,
         compare_applicants,
+        list_employer_blocks,
+        simulate_employer_closure,
         bigquery_mcp,
     ],
 )
