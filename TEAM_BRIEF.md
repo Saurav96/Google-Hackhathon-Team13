@@ -159,6 +159,7 @@ Submit here: http://goo.gle/A4I-Submission
 
 ## Links
 
+- How our solution works, end to end: [FLOW.md](FLOW.md)
 - Organizers' template repo: https://github.com/haggman/A4I2026-challenge-3-micro-grants
 - Pitch deck template: https://docs.google.com/presentation/d/1VJc_4cI7rMvN7t_nZaoysAl3TeZ9oMhkt4itl28V5mU/edit
 - BigQuery Graph introduction: https://docs.cloud.google.com/bigquery/docs/graph-overview
