@@ -13,9 +13,9 @@ Update this table when something is decided, so everyone sees the same answer.
 | Team name | To be decided |
 | Track | Main Street relief, plus one Anchor closure question (proposed) |
 | Corridor | Central Market, San Francisco (proposed) |
-| Team repo | To be added |
-| Google Cloud project ID | To be added |
-| Live demo link | To be added |
+| Team repo | https://github.com/Saurav96/Google-Hackhathon-Team13 |
+| Google Cloud project ID | `qwiklabs-gcp-04-76b40991ee4b` |
+| Live demo link | https://grant-advisor-525982359170.us-central1.run.app (choose `microgrants` in the top left) |
 
 ## The problem in four lines
 
@@ -160,6 +160,8 @@ Submit here: http://goo.gle/A4I-Submission
 ## Links
 
 - How our solution works, end to end: [FLOW.md](FLOW.md)
+- Deck text and video script: [PITCH.md](PITCH.md)
+- The agent, its tools, decisions and limits: [agent/README.md](agent/README.md)
 - Organizers' template repo: https://github.com/haggman/A4I2026-challenge-3-micro-grants
 - Pitch deck template: https://docs.google.com/presentation/d/1VJc_4cI7rMvN7t_nZaoysAl3TeZ9oMhkt4itl28V5mU/edit
 - BigQuery Graph introduction: https://docs.cloud.google.com/bigquery/docs/graph-overview
