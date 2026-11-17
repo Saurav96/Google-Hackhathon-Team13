@@ -11,7 +11,7 @@ Update this table when something is decided, so everyone sees the same answer.
 | Item | Decision |
 |---|---|
 | Team name | To be decided |
-| Track | Main Street relief (proposed) |
+| Track | Main Street relief, plus one Anchor closure question (proposed) |
 | Corridor | Central Market, San Francisco (proposed) |
 | Team repo | To be added |
 | Google Cloud project ID | To be added |
@@ -76,13 +76,34 @@ bash scripts/load.sh central-market
 
 ## The three tracks
 
-We pick one and say which one early in the pitch.
+The README lets us pick one track or combine two. We say our choice early in the pitch.
 
-| Track | Situation |
-|---|---|
-| Main Street relief | Businesses have applied. We choose who gets the money |
-| Micro-producer | Nobody has applied. We find the hidden supplier that others depend on |
-| Anchor closure | A big employer is leaving in 90 days. We find who will be hurt |
+| Track | Situation | Difficulty | Chance to stand out |
+|---|---|---|---|
+| Main Street relief | Businesses have applied. We choose who gets the money | Easiest | Low alone, because most teams will pick it |
+| Micro-producer | Nobody has applied. We find the hidden supplier that others depend on | Medium | Medium |
+| Anchor closure | A big employer is leaving in 90 days. We find who will be hurt | Hardest | High |
+
+## Our proposed track
+
+**Main Street relief as the main track, plus one question borrowed from Anchor closure.**
+
+- **Main Street is the safe base.** It leads straight to the Grant Memo, which is the required output.
+- **One Anchor closure question is the stand out moment.** The officer asks "the office block is leaving, so who is hurt that never applied?" The agent follows the graph forward to the cafes, then backward to their suppliers. The README says most teams will miss this.
+- **The README's own example is this mix:** applications on the desk, plus a rumor that a big building is closing.
+
+The data has no list of applicants, so we pick our own queue of 10 to 12 businesses from Central Market and explain the choice in the pitch.
+
+**Build order:** get Main Street fully working first. Add the Anchor closure question only after that, so it cannot put the deadline at risk.
+
+## What wins beyond the track
+
+Most teams skip these, and they are worth a lot of points.
+
+- **Show when the agent does not fund the biggest hub.** Judges are told to ask this.
+- **Use the real failed loan records** to check our results. The README says almost nobody will notice this data.
+- **Report the bias** toward restaurants, with numbers.
+- **State our assumptions** about what the grant changes.
 
 ## How we are judged
 
