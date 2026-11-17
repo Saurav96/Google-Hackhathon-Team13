@@ -79,6 +79,21 @@ try {
   check("unticking restores them", (await stat("Proposed")) === "$33,000");
   check("why money is left over is explained from the plan", await clickText("summary", "unallocated") && (await text(".why")).includes("Hub"));
 
+  // A budget change updates what it can and asks before changing the grants.
+  await setBudget(20000);
+  await until(() => document.querySelector(".notice.is-over"), 8000);
+  check("lowering the budget keeps the grants and says they no longer fit", (await stat("Proposed")) === "$33,000" && (await text(".notice")).includes("over the $20,000 budget"), await text(".notice"));
+  await clickText(".notice .btn", "Fit the split");
+  await until(() => document.querySelectorAll(".stats strong")[1]?.innerText === "$14,000", 10000);
+  check("one click fits the split to the new budget", (await stat("Proposed")) === "$14,000" && (await stat("Unallocated")) === "$6,000", `${await stat("Proposed")} / ${await stat("Unallocated")}`);
+  await setBudget(50000);
+  await until(() => document.querySelector(".notice"), 8000);
+  check("raising the budget updates unallocated and offers a new split", (await stat("Unallocated")) === "$36,000" && (await text(".notice")).includes("advisor's split would be"), await text(".notice"));
+  await clickText(".notice .btn", "Update the split");
+  await until(() => document.querySelectorAll(".stats strong")[1]?.innerText === "$33,000", 10000);
+  check("the offered split applies in one click", (await stat("Proposed")) === "$33,000" && await page.$(".notice") === null);
+  check("the stats explain what updates by itself", (await text(".stats-hint")).includes("Click the budget"));
+
   // Text edits and freshness.
   await clickText(".narrative-meta .ghost", "Edit");
   await page.waitForSelector(".narrative-edit textarea");
@@ -94,14 +109,15 @@ try {
   check("edits and budget survive a reload", (await text(".narrative")).includes("Committee note") && (await stat("Budget")).startsWith("$40,000"));
 
   // Revisions.
-  const revisionBefore = await text(".report-head .sub");
+  const revisionBefore = await page.$$eval(".bar-tools button", (n) => n.find((e) => e.innerText.includes("Revisions")).innerText);
   await clickText(".bar-tools button", "Revisions");
   await page.waitForSelector(".menu li");
   check("revision history lists the changes", (await page.$$(".menu li")).length >= 5, await text(".menu li"));
   const restoreButtons = await page.$$(".menu li button");
   await restoreButtons[restoreButtons.length - 1].click();
   await sleep(1200);
-  check("an earlier revision can be restored as a new one", (await stat("Budget")).startsWith("$50,000") && (await text(".report-head .sub")) !== revisionBefore, await text(".report-head .sub"));
+  check("an earlier revision can be restored as a new one", (await stat("Budget")).startsWith("$50,000") && (await page.$$eval(".bar-tools button", (n) => n.find((e) => e.innerText.includes("Revisions")).innerText)) !== revisionBefore);
+  check("no status line clutters the report title", await page.$(".report-head .sub") === null);
 
   // Map, card and links.
   await clickText(".link-row", "Speed Queen");

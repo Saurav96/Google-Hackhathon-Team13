@@ -112,7 +112,7 @@ python server.py          # relief desk at http://localhost:8080, ADK UI at /dev
 pip install pytest && pytest -q        # 28 integration tests against the live dataset
 bash ../scripts/deploy.sh              # builds the screen, deploys to Cloud Run, about 5 minutes
 
-# 66 click-through checks in a real browser (needs: npm install puppeteer-core)
+# 72 click-through checks in a real browser (needs: npm install puppeteer-core)
 node ui/tests/ui_test.mjs http://localhost:8080
 ```
 

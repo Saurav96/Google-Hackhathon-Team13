@@ -83,6 +83,15 @@ The screen has the report on the left and the advisor on the right.
 **2:38, close the drawer. Click Export, then PDF report.**
 "And I export exactly the revision I approved, as a PDF for the meeting. A case, not a score."
 
+## Latest screen changes to know before recording
+
+- The report is on the left and the advisor is on the right. "Hide advisor" in the top bar gives the report the full width.
+- The revision number is on the "Revisions" button in the top bar. The report title shows only a state: Draft, Current, Needs update, or Review changes.
+- Click the budget number to change it. If the selected grants no longer fit, a notice appears with "Fit the split to $X". If a better split exists, the notice offers "Update the split".
+- The Alternatives section lists strong businesses outside the queue, taken from all 229 businesses.
+- Menus close when you click anywhere else.
+- Read numbers off the live screen while recording. The data lane changed the footfall weights, so employer closure figures can differ from older notes.
+
 ## Click by click demo checklist
 
 1. Open the live link in Chrome. Wait until the map shows dots.

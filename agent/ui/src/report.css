@@ -184,3 +184,14 @@ table.grid input[type="checkbox"] { width: 17px; height: 17px; accent-color: var
   .legend { gap: 4px 12px; }
 }
 .sec h3.sub-head { margin-top: 18px; }
+
+.budget-value { display: inline-flex; align-items: center; gap: 8px; background: none; border: 1px dashed transparent; border-radius: 8px; padding: 0 6px 0 0; margin-left: -2px; color: var(--act); }
+.budget-value strong { color: var(--text); }
+.budget-value:hover, .budget-value:focus-visible { border-color: var(--act); background: var(--hover); }
+.stats .pending { color: var(--soft); font-weight: 500; }
+.stats-hint { font-size: 12.5px; color: var(--soft); margin: -8px 0 12px; }
+.notice { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px solid var(--hop1); background: rgba(217, 122, 0, 0.09); border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px; }
+.notice span { flex: 1; min-width: 240px; }
+.notice.is-over { border-color: var(--closed); background: rgba(212, 42, 75, 0.08); }
+.notice .btn { white-space: nowrap; }
+.report-head h1 .state { vertical-align: middle; margin-left: 12px; letter-spacing: 0; }

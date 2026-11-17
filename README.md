@@ -19,7 +19,7 @@ An ADK agent and an interactive Grant Memo that help a city grant officer decide
 The officer works in one screen. The Grant Memo is an interactive report on the left, about 70 percent of the width. The advisor chat sits on the right.
 
 1. **The report opens on a computed draft.** No model call is needed to see it. The draft is four grants for $33,000, with 105 distinct businesses in modeled reach, and it is labeled as a draft.
-2. **The officer edits it directly.** They change the budget, tick or untick applicants, and edit the text of any section. Totals, reach and the neighborhood audit follow the selection on screen.
+2. **The officer edits it directly.** They change the budget, tick or untick applicants, and edit the text of any section. Totals, reach and the neighborhood audit follow the selection on screen. When the budget changes, the money left over updates by itself. The selected grants do not change by themselves: the report says they no longer fit, or that a better split exists, and offers it in one click.
 3. **The officer explores the map.** Every dot is a real business at its real address. Clicking one shows what loses a supplier if it closes, two steps out. Links are clickable and say what they are.
 4. **The officer asks the advisor.** Each question carries the report's revision, budget, selected grants and the section being discussed.
 5. **The advisor proposes, the officer applies.** A new split or new wording appears inside the report as a proposal, with a before and after view for text. Nothing changes until "Apply changes". "Dismiss" leaves the report as it was. A proposal made against an older revision cannot be applied.

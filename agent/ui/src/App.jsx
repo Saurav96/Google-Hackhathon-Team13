@@ -293,14 +293,13 @@ function Desk({ config, overview, network }) {
     return () => document.removeEventListener("pointerdown", onDown);
   }, [menu]);
 
-  const ctx = { overview, report, evaluation, plan, mode, setMode, actions, proposals, selected, cascade, closure, select, selectBlock };
+  const ctx = { overview, report, evaluation, plan, mode, setMode, actions, proposals, selected, cascade, closure, select, selectBlock, analysis };
   const workspace = (
     <main className="report" id="report">
       <div className="report-inner">
         <header className="report-head">
-          <h1>Relief funding recommendation</h1>
-          <p className="sub">Interactive Grant Memo, revision {report.revision}, saved on this device
-            <span className={`state is-${status[0]}`} title="Current means the text and numbers match the inputs. It does not mean approved or funded.">{status[1]}</span></p>
+          <h1>Relief funding recommendation
+            <span className={`state is-${status[0]}`} title="Current means the text and numbers match the inputs. It does not mean approved or funded.">{status[1]}</span></h1>
           {analysis === "error" && (
             <p className="flag is-warn">The numbers could not be recalculated, so none are shown. Your edits are kept.
               {" "}<button type="button" className="link" onClick={() => setRetry(retry + 1)}>Try again</button></p>
@@ -333,7 +332,7 @@ function Desk({ config, overview, network }) {
         <h1>Central Market relief desk</h1>
         <div className="bar-tools">
           <button type="button" className="is-link" onClick={() => setDrawer("sources")}><Icon name="info" />Sources and methodology</button>
-          <button type="button" onClick={() => setMenu(menu === "history" ? null : "history")} aria-expanded={menu === "history"}><Icon name="history" />Revisions</button>
+          <button type="button" onClick={() => setMenu(menu === "history" ? null : "history")} aria-expanded={menu === "history"}><Icon name="history" />Revisions ({report.revision})</button>
           <button type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}><Icon name={theme === "dark" ? "sun" : "moon"} /></button>
           <button type="button" onClick={() => setAdvisorOpen(!advisorOpen)} aria-pressed={advisorOpen}><Icon name="chat" />{advisorOpen ? "Hide advisor" : "Advisor"}</button>
           <button type="button" className="is-primary" onClick={() => setMenu(menu === "export" ? null : "export")} aria-expanded={menu === "export"}><Icon name="download" />Export</button>
@@ -356,6 +355,7 @@ function Desk({ config, overview, network }) {
                   {h.revision !== report.revision && <button type="button" onClick={() => { restore(h.revision); setMenu(null); setToast(`Restored revision ${h.revision} as a new revision`); }}>Restore</button>}
                 </li>
               ))}</ul>
+              <p>Saved on this device only.</p>
               <button type="button" className="menu-foot" onClick={() => { startOver(); setProposals([]); setMenu(null); }}>Start a new report</button>
             </div>
           )}

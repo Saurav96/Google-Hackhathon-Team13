@@ -91,7 +91,7 @@ export function Proposals({ proposals, report, onApply, onDismiss }) {
 }
 
 export function Recommendation({ ctx }) {
-  const { overview, report, evaluation, plan, mode, setMode, actions, proposals, selected, select, selectBlock, closure } = ctx;
+  const { overview, report, evaluation, plan, mode, setMode, actions, proposals, selected, select, selectBlock, closure, analysis } = ctx;
   const [editingBudget, setEditingBudget] = useState(false);
   const picks = new Map((plan?.plan || []).map((s) => [s.business_id, s.step]));
   const chosen = new Set(report.selection);
@@ -101,6 +101,11 @@ export function Recommendation({ ctx }) {
     : "No grants are selected yet. Tick applicants below, or use the advisor's split.";
   const isDraft = report.revision === 1;
   const matchesPlan = plan && plan.plan.length === report.selection.length && plan.plan.every((s) => chosen.has(s.business_id));
+  // While numbers are being recalculated, show a dash instead of a figure that may be out of date.
+  const ready = analysis === "ok" && ev && ev.budget_usd === report.budget;
+  const figure = (value) => (ready ? value : <span className="pending" title="Recalculating">--</span>);
+  const budgetJustChanged = report.history[report.history.length - 1]?.summary.startsWith("Budget set");
+  const splitIsStale = ready && plan && plan.budget_usd === report.budget && budgetJustChanged && !matchesPlan;
 
   return (
     <section className="sec" aria-labelledby="sec-recommendation">
@@ -141,17 +146,32 @@ export function Recommendation({ ctx }) {
                     onBlur={(e) => { actions.setBudget(e.target.value); setEditingBudget(false); }} />
                 </form>
               ) : (
-                <strong>{usd(report.budget)}
-                  <button type="button" className="ghost icon-only" onClick={() => setEditingBudget(true)} aria-label="Change the budget" title="Change the budget"><Icon name="edit" size={15} /></button>
-                </strong>
+                <button type="button" className="budget-value" onClick={() => setEditingBudget(true)} aria-label="Change the budget" title="Click to change the budget">
+                  <strong>{usd(report.budget)}</strong><Icon name="edit" size={15} />
+                </button>
               )}
             </div>
-            <div><span>Proposed</span><strong>{usd(ev?.total_usd || 0)}</strong></div>
-            <div className={ev?.over_budget ? "is-over" : ""}><span>{ev?.over_budget ? "Over budget" : "Unallocated"}</span><strong>{usd(Math.abs(ev?.unallocated_usd ?? report.budget))}</strong></div>
+            <div><span className="with-info">Proposed
+              <Info label="proposed">The total of the grants ticked below. It changes when you tick or untick a grant, or apply a split. It does not change by itself when the budget changes.</Info>
+            </span><strong>{figure(usd(ev?.total_usd || 0))}</strong></div>
+            <div className={ready && ev.over_budget ? "is-over" : ""}><span>{ready && ev.over_budget ? "Over budget" : "Unallocated"}</span><strong>{figure(usd(Math.abs(ev?.unallocated_usd ?? 0)))}</strong></div>
             <div><span className="with-info">Modeled reach
               <Info label="modeled reach">Distinct businesses with a modeled supply link, within two steps, to a selected business. Each is counted once. Reach is not a count of businesses saved.</Info>
-            </span><strong>{ev?.distinct_businesses_in_reach ?? 0}</strong></div>
+            </span><strong>{figure(ev?.distinct_businesses_in_reach ?? 0)}</strong></div>
           </div>
+          <p className="stats-hint">Click the budget to change it. Unallocated updates by itself. Proposed and reach follow the grants you tick.</p>
+          {ready && ev.over_budget && (
+            <p className="notice is-over">
+              <span>The selected grants cost {usd(ev.total_usd)}, which is {usd(-ev.unallocated_usd)} over the {usd(report.budget)} budget. Untick a grant, or let the advisor fit the split to this budget.</span>
+              <button type="button" className="btn" onClick={actions.useAdvisorSplit}>Fit the split to {usd(report.budget)}</button>
+            </p>
+          )}
+          {splitIsStale && !ev.over_budget && (
+            <p className="notice">
+              <span>The budget changed, but the selected grants did not. For {usd(report.budget)} the advisor's split would be {plan.plan.length} grant{plan.plan.length === 1 ? "" : "s"} for {usd(plan.plan_total_usd)}, reaching {plan.plan_distinct_businesses_protected} businesses.</span>
+              <button type="button" className="btn" onClick={actions.useAdvisorSplit}>Update the split</button>
+            </p>
+          )}
 
           <Proposals proposals={proposals} report={report} onApply={actions.applyProposal} onDismiss={actions.dismissProposal} />
           {isDraft && <p className="sub"><span className="state is-stale">Draft</span> A computed starting point, not yet reviewed by you or written up by the advisor.</p>}
