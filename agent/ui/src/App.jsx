@@ -261,7 +261,7 @@ function Desk({ config, overview, network }) {
           format,
           snapshot: {
             revision: report.revision, budget_usd: report.budget, selection_ids: report.selection,
-            narrative: report.narrative.recommendation?.text || "", notes_markdown: report.notes,
+            narratives: Object.fromEntries(Object.entries(report.narrative).map(([id, n]) => [id, n.text])), notes_markdown: report.notes,
             subject_id: cascade?.seed.business_id || "", employer_block_id: closure?.employer_block.block_id || "",
             scope: closure ? "employer_closure" : "allocation", needs_update: needsUpdate,
           },
@@ -300,6 +300,7 @@ function Desk({ config, overview, network }) {
         <header className="report-head">
           <h1>Relief funding recommendation
             <span className={`state is-${status[0]}`} title="Current means the text and numbers match the inputs. It does not mean approved or funded.">{status[1]}</span></h1>
+          <p className="report-lede">A draft plan for an 11 applicant sample queue. Change the budget or the grants, click the map, or ask the advisor, which covers every business in the corridor.</p>
           {analysis === "error" && (
             <p className="flag is-warn">The numbers could not be recalculated, so none are shown. Your edits are kept.
               {" "}<button type="button" className="link" onClick={() => setRetry(retry + 1)}>Try again</button></p>

@@ -195,3 +195,4 @@ table.grid input[type="checkbox"] { width: 17px; height: 17px; accent-color: var
 .notice.is-over { border-color: var(--closed); background: rgba(212, 42, 75, 0.08); }
 .notice .btn { white-space: nowrap; }
 .report-head h1 .state { vertical-align: middle; margin-left: 12px; letter-spacing: 0; }
+.report-lede { font-size: 14px; color: var(--soft); margin-top: 4px; max-width: 78ch; }

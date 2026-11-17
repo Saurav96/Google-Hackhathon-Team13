@@ -290,7 +290,7 @@ export default function Chat({ onTool, onToolResult, selectedName, outbox, conte
         {messages.length === 0 ? (
           <div className="welcome">
             <h2>Ask the advisor</h2>
-            <p>The report on the right is yours to edit. Ask about it in plain words. The advisor walks the business graph and proposes changes, and nothing changes until you apply it.</p>
+            <p>Ask in plain words about the report on the left, or about any of the 229 businesses in the corridor, not only the applicants. The advisor proposes changes, and nothing changes until you apply it.</p>
             <div className="starters">
               {STARTERS.map(([label, question]) => (
                 <button type="button" key={label} onClick={() => send(question)}>{label}</button>

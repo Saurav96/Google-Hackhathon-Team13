@@ -90,6 +90,8 @@ The screen has the report on the left and the advisor on the right.
 - Click the budget number to change it. If the selected grants no longer fit, a notice appears with "Fit the split to $X". If a better split exists, the notice offers "Update the split".
 - The Alternatives section lists strong businesses outside the queue, taken from all 229 businesses.
 - Menus close when you click anywhere else.
+- The exported PDF is now the full Grant Memo. It has the grants with addresses, the named chains for each grant, why each other applicant was not selected, the scenario table, the neighborhood charts, and the limits. A sample is in `docs/samples/`.
+- The report has a one line intro under the title, and the chat welcome says it covers all 229 businesses, not only the 11 applicants.
 - Read numbers off the live screen while recording. The data lane changed the footfall weights, so employer closure figures can differ from older notes.
 
 ## Click by click demo checklist
