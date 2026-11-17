@@ -89,6 +89,40 @@ Steps 3 to 5 can repeat several times for one question. For example, the agent m
 | Front end | 1, shared with the agent lane | Web page on Cloud Run | The screen the officer uses, with the queue, the network map, and the memo |
 | Story | Owner to be decided | Google Slides, screen recording | The 6 slide deck and the 3 minute video |
 
+## Which platform each lane works in
+
+| Lane | Where to work | What to do there |
+|---|---|---|
+| Data | Colab Enterprise | Run the notebook that loads and explains the data |
+| Data | Cloud Shell | Backup: run `bash scripts/load.sh central-market` if the notebook fails |
+| Data | BigQuery Studio | Write and test SQL and graph queries |
+| Agent | Antigravity IDE, Cloud Shell Editor, or your own laptop | Write the ADK agent code in Python |
+| Agent | `adk web` | Test the agent in a chat window while building |
+| Agent | Cloud Run | Deploy the agent and get the live link |
+| Front end | Your own laptop or Antigravity IDE | Build the web page |
+| Story | Google Slides and a screen recorder | The 6 slide deck and the 3 minute video |
+| Everyone | GitHub | One shared repo, one branch per lane |
+
+## What each tool is
+
+| Tool | What it is |
+|---|---|
+| Google Skills lab (Qwiklabs) | The event page that gives each of us a temporary Google account and opens our shared project |
+| Google Cloud console | The main website where all the services are found |
+| Colab Enterprise | Notebooks in the browser. You run Python and SQL one cell at a time and see the result under each cell |
+| Cloud Shell | A terminal in the browser, with all Google tools already installed |
+| Cloud Shell Editor | A code editor in the browser that comes with Cloud Shell |
+| BigQuery Studio | The BigQuery page in the console where you write and run queries |
+| Antigravity IDE | Google's code editor with an AI helper inside. It opens from a button in the lab page |
+| Antigravity CLI | The same AI helper in the terminal. Type `agy` in Cloud Shell |
+| `adk web` | A test chat window that comes with ADK. Good for building, weak as a final demo |
+| MCP Toolbox for Databases | Google's ready made connector between an agent and BigQuery |
+| Gemini Enterprise | A ready made chat product that can show our agent to internal users. An optional front end choice |
+| Cloud Run | Hosts our agent and web page online |
+| Agent Runtime | Another place to host an agent. We use Cloud Run, so this is optional |
+
+Antigravity is recommended by the organizers but not required. Any editor is fine.
+
 ## Where the lanes meet
 
 These are the hand over points. Agree on them early, because one lane is blocked until the other delivers.
