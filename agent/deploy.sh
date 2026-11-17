@@ -9,14 +9,12 @@ SERVICE="${SERVICE:-anchor-closure-agent}"
 
 gcloud services enable run.googleapis.com aiplatform.googleapis.com bigquery.googleapis.com \
   cloudbuild.googleapis.com --project "$PROJECT"
-# Google-managed BigQuery MCP server (safe to re-run).
-gcloud beta services mcp enable bigquery.googleapis.com --project "$PROJECT" || \
-  echo "Could not enable the BigQuery MCP endpoint; set MCP_ENABLED=false or use MCP Toolbox."
+# The Google-managed BigQuery MCP endpoint needs only the BigQuery API (enabled above).
 
 # The Cloud Run runtime service account must be able to query BigQuery, call Gemini and use MCP.
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
 SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-for ROLE in roles/bigquery.user roles/bigquery.dataViewer roles/aiplatform.user roles/mcp.toolUser; do
+for ROLE in roles/bigquery.user roles/bigquery.dataViewer roles/aiplatform.user; do
   gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${SA}" \
     --role="$ROLE" --condition=None --quiet >/dev/null || echo "  could not grant $ROLE (grant it in IAM)"
 done
@@ -30,4 +28,4 @@ adk deploy cloud_run \
 
 # min-instances 1 avoids a cold start during the recorded demo.
 gcloud run services update "$SERVICE" --region "$REGION" --project "$PROJECT" --min-instances 1 \
-  --update-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=${REGION}"
+  --update-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global"

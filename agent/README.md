@@ -41,7 +41,7 @@ agent/
 | `show_cascade_path` | The actual path to one business, as text and `TO_JSON(p)` for a front end | `ANY SHORTEST ... {1,2}` |
 | `neighborhood_context` | Tract poverty / no-vehicle / assistance + SBA loan history | SQL + public tract geometry |
 | `equity_audit` | Funded vs exposed vs corridor: industry mix and tract need | SQL |
-| `bq_mcp_*` | Ad hoc read-only lookups through BigQuery's managed MCP server | — |
+| `bq_mcp_*` | Ad hoc lookups through BigQuery's managed MCP server, filtered to read-only tools | — |
 
 ## The exposure model (say this in the deck)
 
@@ -73,8 +73,7 @@ creates the Enterprise reservation that graph queries need.
 # 1. Create the property graph (once)
 bq query --use_legacy_sql=false < agent/sql/create_graph.sql
 
-# 2. Enable BigQuery's managed MCP server (once)
-gcloud beta services mcp enable bigquery.googleapis.com --project=$GOOGLE_CLOUD_PROJECT
+# 2. (Nothing to do for MCP: BigQuery's managed MCP endpoint works once the BigQuery API is on.)
 
 # 3. Install and configure
 cd agent

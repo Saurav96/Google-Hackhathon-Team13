@@ -4,10 +4,9 @@ Used for generic, ad hoc questions ("how many cafes are in the corridor?", "show
 table"). The cascade itself goes through our own tools, because it carries the depth rule and
 the weighting.
 
-One-time setup for the BigQuery managed server:
-    gcloud beta services mcp enable bigquery.googleapis.com --project=$GOOGLE_CLOUD_PROJECT
+Setup: none beyond the BigQuery API being enabled (verified 2026-11-17 on the lab project).
 The caller (you locally, the Cloud Run service account when deployed) needs
-roles/bigquery.user, roles/bigquery.dataViewer and roles/mcp.toolUser.
+roles/bigquery.user and roles/bigquery.dataViewer.
 """
 
 from __future__ import annotations
@@ -20,6 +19,8 @@ from .. import config
 
 _SCOPES = ["https://www.googleapis.com/auth/bigquery", "https://www.googleapis.com/auth/cloud-platform"]
 _creds = None
+READ_ONLY_TOOLS = ["execute_sql_readonly", "get_dataset_info", "get_table_info",
+                   "list_dataset_ids", "list_table_ids"]
 
 
 def _auth_headers(_ctx=None) -> dict[str, str]:
@@ -40,4 +41,7 @@ def bigquery_mcp_toolset() -> McpToolset:
         connection_params=StreamableHTTPConnectionParams(url=config.MCP_URL, timeout=60),
         header_provider=_auth_headers,
         tool_name_prefix="bq_mcp",
+        # Read-only on purpose: the dataset is shared by the whole team. The server also offers
+        # execute_sql (can write) and cancel_job, which the agent never needs.
+        tool_filter=READ_ONLY_TOOLS,
     )

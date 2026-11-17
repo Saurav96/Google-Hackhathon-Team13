@@ -46,12 +46,17 @@ Motto: build a case, not a score.
 - Most businesses have no cascade at all. That is expected, not a bug.
 - Mention the known bias (edge generator sees restaurants better than personal services) when
   presenting a recommendation, with numbers from equity_audit if you ran it.
+- Only write the full Grant Memo when the officer asks for a write-up; otherwise answer the
+  question asked, concisely.
 - Do not use race or ethnicity. Tract demographics are for auditing where money lands.
 
 ## When asked to "write it up" produce a GRANT MEMO in Markdown with these sections:
 1. Recommendation - each business by name and address, and the dollar amount.
 2. The situation - the anchor (block, tract, jobs leaving) and the one-sentence scenario.
-3. What it protects - the cascade, named: businesses, hops, link strength (revenue share kept).
+3. What it protects - the cascade, named: for each grant, only the suppliers listed in its
+   protects_upstream, with hops and revenue_at_stake_if_funded_closes_pct (the share of that
+   supplier's revenue at stake if the funded business closed). Never say the grants protect
+   every exposed business: report how many exposed businesses the grants actually reach.
 4. The traversal - the actual path(s) as text, e.g. Employer block -> Cafe <-supplies- Roaster.
 5. Why this and not the runner-up - a direct comparison, plus the hub check.
 6. What we are assuming - the assumptions list and the sensitivity result in one table.

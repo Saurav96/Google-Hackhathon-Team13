@@ -181,6 +181,41 @@ def _strongest_path(trace: dict[str, Any], target: str) -> Optional[list[str]]:
     return best
 
 
+_TRACT_CACHE: list[dict[str, Any]] = []
+
+
+def _business_tracts() -> list[dict[str, Any]]:
+    """Every corridor business with the census tract it actually sits in and that tract's ACS need
+    figures. Cached per process: the corridor does not change during a session."""
+    if not _TRACT_CACHE:
+        _TRACT_CACHE.extend(run(f"""
+            WITH t AS (
+              SELECT geo_id, tract_geom FROM `{config.TRACT_GEOM_TABLE}`
+              WHERE state_fips_code = '{config.STATE_FIPS}'),
+            acs AS (
+              SELECT LPAD(geo_id, 11, '0') AS geo_id,
+                     SAFE_DIVIDE(poverty, pop_determined_poverty_status) AS poverty_rate,
+                     SAFE_DIVIDE(no_cars, households) AS no_vehicle_rate,
+                     SAFE_DIVIDE(households_public_asst_or_food_stamps, households) AS assistance_rate,
+                     median_income
+              FROM `{config.ACS_TABLE}`)
+            SELECT b.business_id, b.name, b.address, SUBSTR(b.naics4, 1, 2) AS sector,
+                   t.geo_id AS tract, acs.poverty_rate, acs.no_vehicle_rate, acs.assistance_rate,
+                   acs.median_income
+            FROM {config.table('businesses')} b
+            LEFT JOIN t ON ST_CONTAINS(t.tract_geom, ST_GEOGPOINT(b.longitude, b.latitude))
+            LEFT JOIN acs ON acs.geo_id = t.geo_id"""))
+    return _TRACT_CACHE
+
+
+def _need_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def avg(k: str) -> Optional[float]:
+        v = [float(r[k]) for r in rows if r.get(k) is not None]
+        return round(sum(v) / len(v), 3) if v else None
+    return {"n": len(rows), "avg_poverty_rate": avg("poverty_rate"),
+            "avg_no_vehicle_rate": avg("no_vehicle_rate"), "avg_assistance_rate": avg("assistance_rate")}
+
+
 def _clamp_hops(h: int) -> int:
     return max(1, min(MAX_HOPS_ALLOWED, int(h)))
 
@@ -347,7 +382,7 @@ def recommend_grants(budget: float, tool_context: ToolContext, block_id: Optiona
             "protects_upstream": [
                 {"name": _name(trace, u["business_id"]), "business_id": u["business_id"],
                  "hops_from_funded": u["hops_from_funded"],
-                 "revenue_share_kept_pct": round(100 * u["revenue_hit"], 1),
+                 "revenue_at_stake_if_funded_closes_pct": round(100 * u["revenue_hit"], 1),
                  "chain": " <-supplies- ".join(_name(trace, x) for x in u["chain"])}
                 for u in r["upstream_dependants"][:6]],
             "sba_charge_off_on_record": bool(trace["loans"].get(r["business_id"], {}).get("charged_off")),
@@ -448,24 +483,14 @@ def neighborhood_context(business_ids: list[str]) -> dict:
         Per business: tract, poverty rate, no-vehicle rate, public-assistance rate, loans; plus the
         corridor-wide averages for comparison.
     """
-    rows = run(f"""
-        WITH b AS (
-          SELECT business_id, name, address, ST_GEOGPOINT(longitude, latitude) AS pt
-          FROM {config.table('businesses')} WHERE business_id IN UNNEST(@ids)),
-        t AS (
-          SELECT geo_id, tract_geom FROM `{config.TRACT_GEOM_TABLE}` WHERE state_fips_code = '06')
-        SELECT b.business_id, b.name, b.address, d.geo_id AS tract, d.poverty_rate,
-               d.no_vehicle_rate, d.assistance_rate, d.median_income
-        FROM b LEFT JOIN t ON ST_CONTAINS(t.tract_geom, b.pt)
-        LEFT JOIN {config.table('tract_demographics')} d ON d.geo_id = t.geo_id""",
-               {"ids": business_ids})
-    avg = run(f"""SELECT AVG(poverty_rate) AS poverty_rate, AVG(no_vehicle_rate) AS no_vehicle_rate,
-                         AVG(assistance_rate) AS assistance_rate
-                  FROM {config.table('tract_demographics')}""")
+    all_rows = _business_tracts()
+    rows = [r for r in all_rows if r["business_id"] in set(business_ids)]
+    avg = _need_summary(all_rows)
     loans = _loans(business_ids)
     for r in rows:
         r["loans"] = loans.get(r["business_id"], {}).get("loans", [])
-    return {"businesses": rows, "corridor_tract_average": avg[0] if avg else None,
+    return {"businesses": rows, "corridor_average_business_weighted": avg,
+            "source": config.ACS_VINTAGE_NOTE,
             "note": "Demographics are an audit of where money lands, not an input to the ranking. "
                     "Race and ethnicity are excluded entirely."}
 
@@ -483,12 +508,7 @@ def equity_audit(tool_context: ToolContext) -> dict:
     rec = tool_context.state.get("last_recommendation")
     if not rec:
         return {"error": "No recommendation yet. Call recommend_grants first."}
-    rows = run(f"""
-        WITH t AS (SELECT geo_id, tract_geom FROM `{config.TRACT_GEOM_TABLE}` WHERE state_fips_code = '06')
-        SELECT b.business_id, SUBSTR(b.naics4, 1, 2) AS sector, d.poverty_rate, d.no_vehicle_rate
-        FROM {config.table('businesses')} b
-        LEFT JOIN t ON ST_CONTAINS(t.tract_geom, ST_GEOGPOINT(b.longitude, b.latitude))
-        LEFT JOIN {config.table('tract_demographics')} d ON d.geo_id = t.geo_id""")
+    rows = _business_tracts()
     groups = {"corridor": rows,
               "exposed": [r for r in rows if r["business_id"] in set(rec["exposed"])],
               "funded": [r for r in rows if r["business_id"] in set(rec["funded"])]}
@@ -498,12 +518,10 @@ def equity_audit(tool_context: ToolContext) -> dict:
         sectors: dict[str, int] = {}
         for r in rs:
             sectors[r["sector"]] = sectors.get(r["sector"], 0) + 1
-        pov = [r["poverty_rate"] for r in rs if r["poverty_rate"] is not None]
-        veh = [r["no_vehicle_rate"] for r in rs if r["no_vehicle_rate"] is not None]
-        return {"n": len(rs),
-                "sector_share_pct": {k: round(100 * v / n, 1) for k, v in sorted(sectors.items(), key=lambda x: -x[1])},
-                "avg_poverty_rate": round(sum(pov) / len(pov), 3) if pov else None,
-                "avg_no_vehicle_rate": round(sum(veh) / len(veh), 3) if veh else None}
+        out = _need_summary(rs)
+        out["sector_share_pct"] = {k: round(100 * v / n, 1)
+                                   for k, v in sorted(sectors.items(), key=lambda x: -x[1])}
+        return out
 
     return {
         "groups": {k: summary(v) for k, v in groups.items()},
