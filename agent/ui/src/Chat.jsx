@@ -17,21 +17,6 @@ const ACCEPT = "image/*,application/pdf,text/plain,text/csv,.md";
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const seconds = (ms) => `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
 
-function printMemo(html) {
-  const frame = window.open("", "_blank", "width=820,height=900");
-  if (!frame) return false;
-  frame.document.write(`<title>Grant memo</title><style>
-    body{font:16px/1.6 Georgia,serif;max-width:720px;margin:40px auto;color:#111}
-    table{border-collapse:collapse;font:13px sans-serif}td,th{border:1px solid #bbb;padding:4px 8px;text-align:left}
-    h1,h2,h3,h4{font-family:sans-serif}</style>
-    <p style="font:13px sans-serif;border-bottom:2px solid #111;padding-bottom:8px">
-    To: Economic development officer, Central Market relief fund<br>From: Grant advisor agent<br>
-    Date: ${new Date().toLocaleDateString("en-US", { dateStyle: "long" })}</p>${html}`);
-  frame.document.close();
-  frame.print();
-  return true;
-}
-
 function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity, notify }) {
   const { body, followUps } = splitFollowUps(message.text || "");
   const html = DOMPurify.sanitize(marked.parse(body));
@@ -45,6 +30,30 @@ function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity
     const timer = setInterval(() => setElapsed(Date.now() - message.startedAt), 500);
     return () => clearInterval(timer);
   }, [running, message.startedAt]);
+
+  const [downloading, setDownloading] = useState(false);
+
+  async function download() {
+    setDownloading(true);
+    try {
+      const response = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markdown: body, question: message.question || "" }),
+      });
+      if (!response.ok) throw new Error();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = "grant-memo.pdf";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      notify("Report downloaded");
+    } catch {
+      notify("Could not build the report. Try again.");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   async function copy() {
     try {
@@ -81,8 +90,9 @@ function Answer({ message, isLast, speaking, onAsk, onSpeak, onRetry, onActivity
       {!running && body && (
         <div className="msg-actions">
           <button type="button" onClick={copy} title="Copy" aria-label="Copy"><Icon name={copied ? "check" : "copy"} /></button>
-          <button type="button" title="Print as memo" aria-label="Print as memo"
-            onClick={() => printMemo(html) || notify("Allow pop ups for this site to print.")}><Icon name="print" /></button>
+          <button type="button" title="Download as a PDF report" aria-label="Download report" onClick={download} disabled={downloading}>
+            <Icon name="download" /><span>{downloading ? "Preparing" : "Report"}</span>
+          </button>
           {canSpeak && (
             <button type="button" className={speaking ? "is-on" : ""} onClick={onSpeak} aria-pressed={speaking}
               title={speaking ? "Stop reading" : "Read aloud"} aria-label={speaking ? "Stop reading" : "Read aloud"}>

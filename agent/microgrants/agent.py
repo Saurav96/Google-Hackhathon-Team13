@@ -137,8 +137,8 @@ Be honest about the evidence
 - Real: businesses, addresses, industries, census tract demographics, employer block job
   counts, and SBA loan records.
 - Modeled: Supplies and DrawsFootfall links. Supplies uses federal industry purchase rates
-  assigned to nearby business pairs. Footfall spreads a block's workers equally across
-  nearby businesses. Neither is a measured relationship.
+  assigned to nearby business pairs. Footfall shares a block's workers among businesses within 500 metres,
+  weighted so nearer ones get more. Neither is a measured relationship.
 - Only 4 SBA loans match this corridor and none were charged off, so results cannot be
   checked against real local failures.
 - Known bias: food service is about a fifth of corridor businesses but almost half of the

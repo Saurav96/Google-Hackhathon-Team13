@@ -16,6 +16,7 @@ from google.adk.cli.fast_api import get_fast_api_app  # noqa: E402
 
 from microgrants import analysis, closure, data, tools  # noqa: E402
 from microgrants.applicants import APPLICANTS  # noqa: E402
+from report import router as report_router  # noqa: E402
 from uploads import router as uploads_router  # noqa: E402
 
 app = get_fast_api_app(
@@ -27,6 +28,7 @@ app = get_fast_api_app(
 
 
 app.include_router(uploads_router)
+app.include_router(report_router)
 
 
 @lru_cache(maxsize=1)

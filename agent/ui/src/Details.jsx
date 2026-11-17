@@ -60,7 +60,7 @@ export function CaseDetails({ c, ask, grant, compareTo, others, setHops }) {
       <h2>{c.exposed_total
         ? `If ${c.seed.name} closes, ${c.exposed_total} businesses lose a supplier.`
         : `${c.seed.name} supplies no other business in the corridor.`}</h2>
-      <p className="sub">{c.seed.address}. {roleOf(c.seed.network_role)}.</p>
+      <p className="sub"><span className="tag">Public record</span> {c.seed.address}. {roleOf(c.seed.network_role)}.</p>
 
       <div className="figures">
         <div><strong>{c.exposed_by_hops["1_hop"] || 0}</strong><span>buy from it directly</span></div>
@@ -94,7 +94,7 @@ export function CaseDetails({ c, ask, grant, compareTo, others, setHops }) {
           ))}
         </ul>
       ) : <p className="sub">No chains to show.</p>}
-      {chains.length > 0 && <p className="sub">The percentage is the modeled share of the last buyer's input spending that travels along the chain.</p>}
+      {chains.length > 0 && <p className="sub"><span className="tag is-modeled">Modeled relationship</span> The percentage is the modeled share of the last buyer's input spending that travels along the chain.</p>}
 
       <h3>Who the neighborhood is</h3>
       <Bars rows={[
@@ -123,7 +123,7 @@ export function CaseDetails({ c, ask, grant, compareTo, others, setHops }) {
               ))}
             </tbody>
           </table>
-          <p className="sub">{scenarios.what_is_assumed}</p>
+          <p className="sub"><span className="tag is-assumption">Scenario assumption</span> {scenarios.what_is_assumed}</p>
           {scenarios.flip_condition && <p className="sub">{scenarios.flip_condition}</p>}
         </>
       )}
@@ -211,7 +211,7 @@ export function Evidence({ overview }) {
     ["Neighborhood need", "Real", "Census ACS, by tract"],
     ["Worker counts per block", "Real", "Census LEHD"],
     ["Who supplies whom", "Modeled", "Federal BEA purchase rates, assigned to pairs within 1,200 m"],
-    ["Which workers shop where", "Modeled", "Block job counts split equally across nearby businesses"],
+    ["Which workers shop where", "Modeled", "Block job counts shared among businesses within 500 m, nearer ones weighted more"],
   ];
   return (
     <div className="details">

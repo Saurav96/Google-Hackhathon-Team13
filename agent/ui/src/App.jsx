@@ -5,6 +5,7 @@ import Chat from "./Chat.jsx";
 import { CaseDetails, ClosureDetails, Evidence } from "./Details.jsx";
 import Icon from "./Icons.jsx";
 import Info from "./Info.jsx";
+import MapCard from "./MapCard.jsx";
 import MapView from "./MapView.jsx";
 
 const LEGEND = [
@@ -47,6 +48,8 @@ export default function App() {
   const [funded, setFunded] = useState(() => new Set());
   const [reach, setReach] = useState(() => new Map());
   const [outbox, setOutbox] = useState(null);
+  const [proposal, setProposal] = useState(null);
+  const [cardOpen, setCardOpen] = useState(true);
   const latest = useRef(null);
   const cascades = useRef(new Map());
   const wide = useWide();
@@ -88,7 +91,7 @@ export default function App() {
       return;
     }
     latest.current = id;
-    setSelected(id); setClosure(null); setMode("queue");
+    setSelected(id); setClosure(null); setMode("queue"); setCardOpen(true);
     const key = `${id}:${hops}`;
     if (cascades.current.has(key)) return setCascade(cascades.current.get(key));
     try {
@@ -107,7 +110,7 @@ export default function App() {
       return;
     }
     latest.current = blockId;
-    setSelected(blockId); setCascade(null); setMode("employer");
+    setSelected(blockId); setCascade(null); setMode("employer"); setCardOpen(true);
     try {
       const r = await getJson(`/api/closure/${encodeURIComponent(blockId)}`);
       if (latest.current === blockId) setClosure(r);
@@ -137,8 +140,10 @@ export default function App() {
   const onTool = useCallback((name, args) => {
     if (name === "trace_cascade" && args.business_id) select(args.business_id, { toggle: false });
     if (name === "simulate_employer_closure" && args.block_id) selectBlock(args.block_id, { toggle: false });
-    if (name === "plan_budget") applyPlan(args.budget_usd > 0 ? args.budget_usd : budget);
-  }, [select, selectBlock, applyPlan, budget]);
+    if (name === "plan_budget") {
+      getJson(`/api/plan?budget_usd=${Math.round(args.budget_usd > 0 ? args.budget_usd : budget)}`).then(setProposal).catch(() => {});
+    }
+  }, [select, selectBlock, budget]);
 
   const askAdvisor = useCallback((question) => {
     setTab("chat");
@@ -210,7 +215,7 @@ export default function App() {
                 <button type="button" className="queue-main" onClick={() => select(a.business_id)}>
                   <span className="queue-name">{a.name}</span>
                   <span className="queue-meta">
-                    {roleOf(a.network_role)}, reaches {a.exposed_total}
+                    <i className={`role-dot is-${roleOf(a.network_role).split(/[ /]/)[0].toLowerCase()}`} />{roleOf(a.network_role)}, reaches {a.exposed_total}
                     {planOrder.has(a.business_id) && <b>, advisor pick {planOrder.get(a.business_id)}</b>}
                   </span>
                 </button>
@@ -245,8 +250,8 @@ export default function App() {
   );
 
   const stage = (
-    <section className="stage">
-      <MapView apiKey={config.maps_api_key} nodes={nodes} view={view} funded={funded} protectedIds={protectedIds} theme={theme}
+    <section className={`stage${cardOpen && (cascade || closure) ? " has-card" : ""}`}>
+      <MapView apiKey={config.maps_api_key} nodes={nodes} view={view} funded={funded} protectedIds={protectedIds} theme={theme} reserveRight={wide && cardOpen ? 320 : 40}
         onSelect={(id) => (id ? select(id) : select(null))} />
       <p className="headline" aria-live="polite">{headline}</p>
       <ul className="legend">
@@ -255,6 +260,22 @@ export default function App() {
         <li><Info label="the map">Each dot is a real registered business at its real address. Lines are modeled supply links: who likely buys from whom, based on federal industry purchase rates. Click a dot to close that business, and click it again to clear.</Info></li>
       </ul>
       {problem && <p className="map-problem">{problem}</p>}
+      {proposal && proposal.plan.length > 0 && (
+        <div className="proposal" role="status">
+          <p><strong>The advisor proposes {proposal.plan.length} grants</strong> for {usd(proposal.plan_total_usd)}, protecting {proposal.plan_distinct_businesses_protected} businesses.</p>
+          <button type="button" className="btn" onClick={async () => {
+            setPlan(proposal);
+            const ids = proposal.plan.map((s) => s.business_id);
+            await Promise.all(ids.map(loadReach));
+            setFunded(new Set(ids));
+            setProposal(null);
+          }}>Apply this plan</button>
+          <button type="button" className="btn is-plain" onClick={() => setProposal(null)}>Dismiss</button>
+        </div>
+      )}
+      {cardOpen && !pendingName && (cascade || closure) && (
+        <MapCard cascade={cascade} closure={closure} onClose={() => setCardOpen(false)} onDetails={() => setTab("details")} onAsk={askAdvisor} />
+      )}
     </section>
   );
 

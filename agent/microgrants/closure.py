@@ -153,7 +153,7 @@ def simulate_employer_closure(block_id: str, max_hops: int = 2) -> dict:
             "the buyer's footfall loss times the supply link intensity. Chains read supplier -> buyer."
         ),
         "evidence_note": (
-            "Job counts are real. Footfall and supply links are modeled, and footfall is spread "
-            "equally across nearby businesses, so treat shares as rough."
+            "Job counts are real. Footfall and supply links are modeled. Footfall gives nearer "
+            "businesses a larger share of a block's workers, within 500 metres, so treat shares as rough."
         ),
     }

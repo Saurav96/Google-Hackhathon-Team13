@@ -38,7 +38,7 @@ function icon(maps, fill, scale, { ring, weight = 1.2, opacity = 1 } = {}) {
   };
 }
 
-export default function MapView({ apiKey, nodes, view, funded, protectedIds, onSelect, theme }) {
+export default function MapView({ apiKey, nodes, view, funded, protectedIds, onSelect, theme, reserveRight = 40 }) {
   const COLORS = PALETTE[theme] || PALETTE.light;
   const holder = useRef(null);
   const ctx = useRef(null);
@@ -178,19 +178,25 @@ export default function MapView({ apiKey, nodes, view, funded, protectedIds, onS
     c.timers.push(setTimeout(() => paint(2), STEP_MS * 2));
 
     // Move the map only when part of the cascade is off screen.
-    const visible = map.getBounds();
     const points = [...state.keys()].filter((id) => markers.has(id)).map((id) => markers.get(id).position);
-    // "On screen" means clear of the edges and of the headline, not merely inside the frame.
-    const comfortable = (p) => {
-      const ne = visible.getNorthEast(), sw = visible.getSouthWest();
-      const h = ne.lat() - sw.lat(), w = ne.lng() - sw.lng();
-      return p.lat < ne.lat() - 0.16 * h && p.lat > sw.lat() + 0.1 * h && p.lng > sw.lng() + 0.08 * w && p.lng < ne.lng() - 0.08 * w;
-    };
-    if (points.length && visible && !points.every(comfortable)) {
+    const frame = () => {
+      const visible = map.getBounds();
+      // "On screen" means clear of the edges, the headline and the card, not merely inside the frame.
+      const comfortable = (p) => {
+        const ne = visible.getNorthEast(), sw = visible.getSouthWest();
+        const h = ne.lat() - sw.lat(), w = ne.lng() - sw.lng();
+        return p.lat() < ne.lat() - 0.16 * h && p.lat() > sw.lat() + 0.1 * h
+          && p.lng() > sw.lng() + 0.08 * w && p.lng() < ne.lng() - (reserveRight > 100 ? 0.46 : 0.08) * w;
+      };
+      const asLatLng = points.map((p) => new maps.LatLng(p));
+      if (!asLatLng.length || asLatLng.every(comfortable)) return;
       const focus = new maps.LatLngBounds();
-      points.forEach((p) => focus.extend(p));
-      map.fitBounds(focus, { top: 90, bottom: 60, left: 40, right: 40 });
-    }
+      asLatLng.forEach((p) => focus.extend(p));
+      map.fitBounds(focus, { top: 90, bottom: 60, left: 40, right: reserveRight });
+    };
+    // Right after the map is created its bounds are not known yet, so wait for it to settle.
+    if (map.getBounds()) frame();
+    else maps.event.addListenerOnce(map, "idle", frame);
   }, [ready, view, funded, protectedIds, theme]);
 
   return (
