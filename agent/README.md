@@ -77,12 +77,29 @@ python server.py          # relief desk at http://localhost:8080, ADK UI at /dev
 
 `adk web` also works from this folder if you only want the ADK developer UI.
 
+## The screen
+
+- **Chat first.** Short answers, three suggested follow up questions after each one, and a list
+  of the tools the advisor used. Chats can be started, renamed, deleted and reopened.
+- **The map follows the advisor.** When it traces a cascade or splits the budget, the Google Map
+  shows it without a click.
+- **Voice.** Ask by microphone and hear a short spoken answer (Chrome and Edge).
+- **Attachments.** Drop in an application letter, photo or PDF. Gemini reads it, the advisor
+  checks the business against the graph, and the file is kept in a private Cloud Storage bucket.
+- **Light and dark mode**, resizable panels, and an "i" next to anything that needs explaining.
+
 ## Test and deploy
 
 ```bash
 pip install pytest && pytest -q        # 21 integration tests against the live dataset
-bash ../scripts/deploy.sh              # Cloud Run, about 5 minutes
+bash ../scripts/deploy.sh              # builds the screen, deploys to Cloud Run, about 5 minutes
+
+# 40 click-through checks in a real browser (needs: npm install puppeteer-core)
+node ui/tests/ui_test.mjs http://localhost:8080
 ```
+
+The Google Maps key is not in the repo. Put `MAPS_API_KEY=...` in `microgrants/.env`; the deploy
+script passes it to the service. The key is restricted to this site and to the Maps API.
 
 ## Layout
 
@@ -94,6 +111,8 @@ microgrants/analysis.py    budget split, scenarios, what if, screening, audits
 microgrants/closure.py     employer closure, forward then backward
 microgrants/applicants.py  the demo queue and budget
 server.py                  one service: ADK API, JSON for the screen, the screen
-web/                       the relief desk screen, plain ES modules, no build step
-tests/                     edge case tests
+uploads.py                 attached documents, stored in Cloud Storage
+ui/                        the relief desk screen, React and Vite source
+web/                       the built screen that the server serves
+tests/                     edge case tests for the tools
 ```

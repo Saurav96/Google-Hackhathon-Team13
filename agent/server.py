@@ -16,6 +16,7 @@ from google.adk.cli.fast_api import get_fast_api_app  # noqa: E402
 
 from microgrants import analysis, closure, data, tools  # noqa: E402
 from microgrants.applicants import APPLICANTS  # noqa: E402
+from uploads import router as uploads_router  # noqa: E402
 
 app = get_fast_api_app(
     agents_dir=str(AGENT_DIR),
@@ -23,6 +24,9 @@ app = get_fast_api_app(
     auto_create_session=True,
     allow_origins=["*"],
 )
+
+
+app.include_router(uploads_router)
 
 
 @lru_cache(maxsize=1)
@@ -54,6 +58,17 @@ def _overview() -> dict:
         "health": analysis.data_health_check(),
         "audit": analysis.equity_audit(funded) if funded else None,
     }
+
+
+@app.get("/api/config")
+def config() -> dict:
+    """Browser settings. The Maps key is restricted to this site's addresses and to the Maps API."""
+    return {"maps_api_key": os.environ.get("MAPS_API_KEY", "")}
+
+
+@app.get("/api/plan")
+def plan(budget_usd: int = 0) -> dict:
+    return analysis.plan_budget(budget_usd)
 
 
 @app.get("/api/network")
