@@ -81,7 +81,7 @@ The screen has the report on the left and the advisor on the right.
 "We are honest about the evidence. Businesses, census data and loans are real. The links are modeled from federal purchase rates. We found a bias in our own output: food service is 21.4% of businesses but 45.5% of cascades."
 
 **2:38, close the drawer. Click Export, then PDF report.**
-"And I export exactly the revision I approved, as a PDF for the meeting. A case, not a score."
+"And I export exactly the revision I approved, as a PDF for the meeting. It names each grant, shows the path behind it, says why the others were left out, and lists what to check before approval. A case, not a score."
 
 ## Latest screen changes to know before recording
 
@@ -90,7 +90,13 @@ The screen has the report on the left and the advisor on the right.
 - Click the budget number to change it. If the selected grants no longer fit, a notice appears with "Fit the split to $X". If a better split exists, the notice offers "Update the split".
 - The Alternatives section lists strong businesses outside the queue, taken from all 229 businesses.
 - Menus close when you click anywhere else.
-- The exported PDF is now the full Grant Memo. It has the grants with addresses, the named chains for each grant, why each other applicant was not selected, the scenario table, the neighborhood charts, and the limits. A sample is in `docs/samples/`.
+- The exported PDF is the full Grant Memo in the team's themed layout, about 5 pages. A sample is in `docs/samples/grant-memo-revision-3.pdf`. It is worth 5 seconds on camera, because it is the artifact the challenge asks for.
+  - Page 1: a headline that follows the selection ("Four grants. One clear case."), a dark summary box, the budget, proposed and unallocated amounts, and each grant with its address.
+  - Then: why each other applicant was not selected, with a plain reason.
+  - Then: "See the relationships behind it", with a path diagram drawn from a real path in the graph, the chains for every grant, and the scenario table for what the grant changes.
+  - Last: who the neighborhood is, what supports the memo, and a "Review before approval" box with the limits.
+- The Markdown export has the same content as plain text and tables.
+- If the officer edited any section text, that text appears in the export. If the budget or grants changed after the text was written, the export is marked as a draft.
 - The report has a one line intro under the title, and the chat welcome says it covers all 229 businesses, not only the 11 applicants.
 - Read numbers off the live screen while recording. The data lane changed the footfall weights, so employer closure figures can differ from older notes.
 
