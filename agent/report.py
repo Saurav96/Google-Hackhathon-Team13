@@ -8,12 +8,12 @@ from html import escape
 from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import BaseModel
-from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.graphics.shapes import Drawing, Line, Polygon, Rect, String
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from microgrants import analysis, data, tools
 from microgrants.applicants import APPLICANTS
@@ -368,116 +368,267 @@ def markdown_for(snapshot: Snapshot) -> str:
     return "\n".join(out) + "\n"
 
 
+TEAL = colors.HexColor("#0b8484")
+NAVY = colors.HexColor("#152a43")
+MIST = colors.HexColor("#eef4f6")
+RULE = colors.HexColor("#d9e2e7")
+GRAY = colors.HexColor("#5f6f7c")
+AMBER_BG = colors.HexColor("#fff3dc")
+AMBER = colors.HexColor("#9a6508")
+NUMBER_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
+
+T_EYEBROW = ParagraphStyle("t_eyebrow", fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=TEAL, spaceAfter=7)
+T_TITLE = ParagraphStyle("t_title", fontName="Helvetica-Bold", fontSize=25, leading=29, textColor=NAVY, spaceAfter=4)
+T_LEDE = ParagraphStyle("t_lede", fontName="Helvetica", fontSize=10.5, leading=14, textColor=GRAY, spaceAfter=14)
+T_BODY = ParagraphStyle("t_body", fontName="Helvetica", fontSize=10, leading=14.5, textColor=NAVY, spaceAfter=6)
+T_NOTE = ParagraphStyle("t_note", fontName="Helvetica", fontSize=8, leading=11, textColor=GRAY, spaceAfter=4)
+T_TH = ParagraphStyle("t_th", fontName="Helvetica-Bold", fontSize=7.5, leading=10, textColor=colors.white)
+T_TD = ParagraphStyle("t_td", fontName="Helvetica", fontSize=9, leading=12, textColor=NAVY)
+T_BIG = ParagraphStyle("t_big", fontName="Helvetica-Bold", fontSize=24, leading=28, textColor=NAVY, spaceAfter=3)
+T_LABEL = ParagraphStyle("t_label", fontName="Helvetica", fontSize=9, leading=12, textColor=GRAY)
+
+
+def _sub(number: int, title: str) -> Table:
+    """A numbered sub heading: a small teal number beside a bold title."""
+    num = ParagraphStyle("t_num", fontName="Helvetica-Bold", fontSize=9.5, leading=17, textColor=TEAL)
+    head = ParagraphStyle("t_head", fontName="Helvetica-Bold", fontSize=14, leading=17, textColor=NAVY)
+    table = Table([[Paragraph(f"{number:02d}", num), Paragraph(escape(title), head)]], colWidths=[26, WIDTH - 26])
+    table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                               ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    return table
+
+
+def _themed_table(rows: list[list[str]], shares: list[float]) -> Table:
+    data_rows = [[Paragraph(escape(c).upper(), T_TH) for c in rows[0]]] + [[Paragraph(_inline(c), T_TD) for c in r] for r in rows[1:]]
+    table = Table(data_rows, colWidths=[WIDTH * share for share in shares], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, MIST]),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.5, RULE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    return table
+
+
+def _box(flowables: list, background, padding: int = 14) -> Table:
+    table = Table([[flowables]], colWidths=[WIDTH])
+    table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), background), ("ROUNDEDCORNERS", [8, 8, 8, 8]),
+                               ("LEFTPADDING", (0, 0), (-1, -1), padding + 4), ("RIGHTPADDING", (0, 0), (-1, -1), padding + 4),
+                               ("TOPPADDING", (0, 0), (-1, -1), padding), ("BOTTOMPADDING", (0, 0), (-1, -1), padding)]))
+    return table
+
+
+def _figures(items: list[tuple[str, str]], background=None) -> Table:
+    table = Table([[[Paragraph(value, T_BIG), Paragraph(escape(label), T_LABEL)] for value, label in items]], colWidths=[WIDTH / len(items)] * len(items))
+    style = [("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0 if background is None else 16),
+             ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 12)]
+    style += [("LINEBELOW", (0, 0), (-1, -1), 0.7, RULE)] if background is None else [("BACKGROUND", (0, 0), (-1, -1), background), ("ROUNDEDCORNERS", [8, 8, 8, 8])]
+    table.setStyle(TableStyle(style))
+    return table
+
+
+def _path_diagram(chain: dict) -> Drawing:
+    """One walked path as boxes and arrows, with the modeled share on each link."""
+    names = chain["chain"].split(" -> ")
+    roles = ["Supplier"] + ["Buyer and supplier"] * (len(names) - 2) + ["Downstream buyer" if len(names) > 2 else "Buyer"]
+    gap = 40
+    box_w = (WIDTH - 28 - gap * (len(names) - 1)) / len(names)
+    drawing = Drawing(WIDTH - 28, 58)
+    for i, (name, role) in enumerate(zip(names, roles)):
+        x = i * (box_w + gap)
+        drawing.add(Rect(x, 8, box_w, 42, rx=6, ry=6, fillColor=MIST if i == 0 else colors.white, strokeColor=RULE, strokeWidth=1))
+        limit = int(box_w / 5.3)
+        drawing.add(String(x + 9, 33, name if len(name) <= limit else name[: limit - 1] + "…", fontName="Helvetica-Bold", fontSize=9, fillColor=NAVY))
+        drawing.add(String(x + 9, 18, role, fontName="Helvetica", fontSize=7.5, fillColor=GRAY))
+        if i < len(names) - 1:
+            x0, x1 = x + box_w + 5, x + box_w + gap - 5
+            drawing.add(Line(x0, 29, x1 - 4, 29, strokeColor=TEAL, strokeWidth=1.4))
+            drawing.add(Polygon([x1, 29, x1 - 6, 32.5, x1 - 6, 25.5], fillColor=TEAL, strokeColor=TEAL))
+            drawing.add(String(x0, 37, f"{100 * chain['link_intensities'][i]:.2f}%", fontName="Helvetica", fontSize=7.5, fillColor=GRAY))
+    return drawing
+
+
 def build_snapshot(snapshot: Snapshot) -> bytes:
     facts = _facts(snapshot)
-    ev, notes = facts["evaluation"], facts["narratives"]
+    ev, notes, grants = facts["evaluation"], facts["narratives"], facts["grants"]
     pct = lambda x: f"{100 * x:.1f}%"  # noqa: E731
+    count = len(grants)
+    word = NUMBER_WORDS[count] if count < len(NUMBER_WORDS) else str(count)
+    numbers = iter(range(1, 20))
+    stamp = f"Grant memo  |  {date.today():%d %b %Y}  |  Rev. {snapshot.revision}" + ("  |  Draft" if snapshot.needs_update else "")
+
+    def page(canvas, doc):
+        width, height = LETTER
+        canvas.saveState()
+        canvas.setFillColor(TEAL)
+        canvas.rect(0, height - 9, width, 9, stroke=0, fill=1)
+        canvas.setFont("Helvetica-Bold", 9)
+        canvas.setFillColor(NAVY)
+        canvas.drawString(inch, height - 42, "CENTRAL MARKET")
+        canvas.setFont("Helvetica", 9)
+        canvas.setFillColor(GRAY)
+        canvas.drawString(inch + 104, height - 42, "/  RELIEF DESK")
+        canvas.setFillColor(MIST)
+        canvas.roundRect(width - inch - 132, height - 49, 132, 19, 9.5, stroke=0, fill=1)
+        canvas.setFillColor(GRAY)
+        canvas.setFont("Helvetica-Bold", 7.5)
+        canvas.drawString(width - inch - 120, height - 43, "INTERACTIVE GRANT MEMO")
+        canvas.setStrokeColor(RULE)
+        canvas.line(inch, height - 60, width - inch, height - 60)
+        canvas.line(inch, 0.78 * inch, width - inch, 0.78 * inch)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawString(inch, 0.58 * inch, stamp)
+        canvas.drawRightString(width - inch, 0.58 * inch, f"Page {doc.page}")
+        canvas.restoreState()
+
+    # ---- Part 1: the recommendation ----
     story = [
-        Paragraph(escape(snapshot.title), H1),
-        Paragraph(f"Interactive Grant Memo, revision {snapshot.revision}, {date.today():%B %d, %Y}", SMALL),
-        Paragraph("To: Economic development officer, Central Market relief fund. From: Grant advisor agent and the reviewing officer.", SMALL),
+        Paragraph("01 / FUNDING RECOMMENDATION", T_EYEBROW),
+        Paragraph(f"{word} grant{'' if count == 1 else 's'}. One clear case." if count else "No grants selected yet.", T_TITLE),
+        Paragraph("Central Market, San Francisco  |  Main Street relief scenario  |  To: economic development officer", T_LEDE),
     ]
     if snapshot.needs_update:
-        story.append(Paragraph("<b>Draft.</b> The inputs changed after some text was written. Review before presenting.", SMALL))
-    story.append(Table([[""]], colWidths=[WIDTH], rowHeights=[4], style=TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.2, INK)])))
+        story.append(_box([Paragraph("<b>DRAFT.</b> The budget or the selected grants changed after some text was written. Review it before presenting.",
+                                     ParagraphStyle("d", parent=T_BODY, textColor=AMBER, spaceAfter=0))], AMBER_BG, 9))
+        story.append(Spacer(1, 10))
+    white = ParagraphStyle("w", parent=T_BODY, textColor=colors.white, spaceAfter=0)
+    lead_line = f"Recommend ${ev['total_usd']:,} across {word.lower()} business{'' if count == 1 else 'es'}" if count else "Tick applicants in the report to build a recommendation"
+    story.append(_box([
+        Paragraph(lead_line, ParagraphStyle("wh", parent=white, fontName="Helvetica-Bold", fontSize=15, leading=19, spaceAfter=5)),
+        Paragraph(escape(notes.get("recommendation", "").strip()) or
+                  f"The selected grants have a modeled reach of <b>{ev['distinct_businesses_in_reach']} distinct businesses</b>. "
+                  "This is network exposure, not a forecast of businesses saved.", white),
+    ], NAVY, 16))
     story.append(Spacer(1, 8))
+    story.append(_figures([(f"${ev['budget_usd']:,}", "Relief budget"), (f"${ev['total_usd']:,}", "Proposed allocation"),
+                           (f"${abs(ev['unallocated_usd']):,}", "Over budget" if ev["over_budget"] else "Unallocated balance")]))
 
-    story.append(Paragraph("1. Recommendation", H2))
-    number = ParagraphStyle("n2", parent=BODY, fontName="Helvetica-Bold", fontSize=16, leading=19, spaceAfter=0)
-    stats = [(f"${ev['budget_usd']:,}", "budget"), (f"${ev['total_usd']:,}", "proposed"),
-             (f"${abs(ev['unallocated_usd']):,}", "over budget" if ev["over_budget"] else "unallocated"),
-             (str(ev["distinct_businesses_in_reach"]), "in modeled reach")]
-    boxes = Table([[[Paragraph(n, number), Paragraph(label, SMALL)] for n, label in stats]], colWidths=[WIDTH / 4] * 4)
-    boxes.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, LINE), ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                               ("LEFTPADDING", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]))
-    story += [boxes, Spacer(1, 8)]
-    story += _body(notes.get("recommendation", "").strip() or _summary(ev))
-    if facts["grants"]:
-        story.append(_wide_table(
-            [["Business", "Address", "Role", "Grant", "Newly in reach"]]
-            + [[g["name"], g["address"], g["network_role"], f"${g['grant_usd']:,}", str(g["newly_protected"])] for g in facts["grants"]],
-            [0.28, 0.27, 0.19, 0.11, 0.15]))
-        story.append(Spacer(1, 8))
-        story.append(_bars("Businesses newly in modeled reach, per grant",
-                           [(g["name"], g["newly_protected"], f"{g['newly_protected']}  (${g['grant_usd']:,})", SAFE) for g in facts["grants"]], WIDTH, 84, 170))
-        story.append(Paragraph("Demo applicants and requested amounts. Reach counts modeled links. It is not a count of businesses saved.", SMALL))
-
-        story.append(Paragraph("2. What each grant protects, and the traversal", H2))
-        if notes.get("impact"):
-            story += _body(notes["impact"])
-        for g in facts["grants"]:
-            c = g["cascade"]
-            block = [
-                Paragraph(f"<b>{escape(g['name'])}.</b> {c['exposed_total']} businesses within two steps "
-                          f"({c['exposed_by_hops'].get('1_hop', 0)} direct, {c['exposed_total'] - c['exposed_by_hops'].get('1_hop', 0)} one step further). "
-                          f"{c['exposed_not_in_applicant_queue']} are outside the demo applicant queue. "
-                          f"Same industry peers in the corridor: {c['replaceability']['same_industry_peers_in_corridor']}.", BODY),
-            ]
-            if g["chains"]:
-                block.append(_wide_table(
-                    [["Chain, supplier to buyer", "Steps", "Share of buyer input spending"]]
-                    + [[_arrow(ch["chain"]), str(ch["hops"]), f"{100 * ch['path_strength']:.2f}%"] for ch in g["chains"]],
-                    [0.66, 0.1, 0.24]))
-            block.append(Spacer(1, 8))
-            story.append(KeepTogether(block))
-        story.append(Paragraph("Chains are the paths walked in the BigQuery property graph. The strongest paths are shown, plus the furthest ones.", SMALL))
-
+    if grants:
+        story.append(_sub(next(numbers), "Proposed allocation"))
+        story.append(_themed_table(
+            [["Business", "Address", "Proposed", "Own reach", "Newly in reach"]]
+            + [[g["name"], g["address"], f"${g['grant_usd']:,}", f"{g['cascade_reach']} businesses", str(g["newly_protected"])] for g in grants],
+            [0.31, 0.24, 0.14, 0.17, 0.14]))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph(f"Reach overlaps across businesses. The union is {ev['distinct_businesses_in_reach']} distinct businesses, so the "
+                               "individual counts must not be added up. Applicants and grant amounts are demo inputs.", T_NOTE))
     if facts["others"]:
-        story.append(Paragraph("3. Why not the others", H2))
+        block = [_sub(next(numbers), "Why not the others")]
         if notes.get("alternatives"):
-            story += _body(notes["alternatives"])
-        story.append(_wide_table(
+            block.append(Paragraph(escape(notes["alternatives"]), T_BODY))
+        block.append(_themed_table(
             [["Business", "Reach", "Peers", "Requested", "Why it is not selected"]]
             + [[o["name"], str(o["reach"]), str(o["peers"]), f"${o['requested_usd']:,}", o["why"]] for o in facts["others"]],
-            [0.24, 0.08, 0.08, 0.12, 0.48]))
+            [0.24, 0.09, 0.08, 0.16, 0.43]))
+        block.append(Spacer(1, 5))
+        block.append(Paragraph("The split is a rule of thumb: most newly reached businesses per dollar, discounted for local substitutes, "
+                               "with hubs left out. It is not a proven best answer.", T_NOTE))
+        story.extend(block)
 
-    sc = facts["scenarios"]
-    if sc and "error" not in sc:
-        block = [Paragraph(f"4. What the grant changes: {escape(sc['business'])}, ${sc['grant_usd']:,}", H2)]
-        if notes.get("scenarios"):
-            block += _body(notes["scenarios"])
-        rows = [["If we assume", "Closure risk without a grant", "Grant cuts the risk by", "Businesses shielded", "Cost per business"]]
-        for name, row in sc["scenarios"].items():
-            cost = f"${row['cost_per_business_shielded_usd']:,}" if row["cost_per_business_shielded_usd"] else "n/a"
-            rows.append([name.title(), f"{100 * row['closure_risk_without_grant']:.0f}%", f"{100 * row['risk_cut_by_grant']:.0f}%",
-                         f"{row['expected_businesses_shielded']:.1f}", cost])
-        block += [_wide_table(rows, [0.2, 0.24, 0.2, 0.18, 0.18]), Spacer(1, 4), Paragraph(escape(sc["what_is_assumed"]), SMALL)]
-        if sc.get("flip_condition"):
-            block.append(Paragraph(escape(sc["flip_condition"]), SMALL))
-        story.append(KeepTogether(block))
+    # ---- Part 2: what it protects ----
+    if grants:
+        lead = grants[0]
+        c = lead["cascade"]
+        story += [PageBreak(), Paragraph("02 / WHAT IT PROTECTS", T_EYEBROW), Paragraph("See the relationships behind it.", T_TITLE),
+                  Paragraph(f"Lead example: {escape(lead['name'])}, {escape(lead['address'])}  |  ${lead['grant_usd']:,} proposed", T_LEDE),
+                  _figures([(str(c["exposed_total"]), f"Modeled reach: {c['exposed_by_hops'].get('1_hop', 0)} direct, "
+                                                      f"{c['exposed_total'] - c['exposed_by_hops'].get('1_hop', 0)} one step further"),
+                            (str(c["exposed_not_in_applicant_queue"]), "Reached businesses outside the demo queue"),
+                            (str(c["replaceability"]["same_industry_peers_in_corridor"]), "Same industry peers in the corridor")], MIST)]
+        two_hop = next((ch for ch in lead["chains"] if ch["hops"] > 1), lead["chains"][0] if lead["chains"] else None)
+        if two_hop:
+            caption = ParagraphStyle("cap", fontName="Helvetica-Bold", fontSize=8, leading=11, textColor=TEAL, spaceAfter=6)
+            story += [_sub(next(numbers), "A path walked in the graph"),
+                      _box([Paragraph("SUPPLY RELATIONSHIP  /  SUPPLIER TO BUYER  /  NOT A GEOGRAPHIC MAP", caption), _path_diagram(two_hop)], MIST, 12),
+                      Spacer(1, 5),
+                      Paragraph("Percentages are modeled shares of the buyer's input spending, not closure probabilities. "
+                                "The path comes from a two step traversal of the BigQuery property graph.", T_NOTE)]
+        if notes.get("impact"):
+            story.append(Paragraph(escape(notes["impact"]), T_BODY))
+        rows = [["Grant", "Chain, supplier to buyer", "Steps", "Share of input spending"]]
+        for g in grants:
+            for i, ch in enumerate(g["chains"][:4]):
+                rows.append([g["name"] if i == 0 else "", _arrow(ch["chain"]), str(ch["hops"]), f"{100 * ch['path_strength']:.2f}%"])
+        story += [_sub(next(numbers), "The traversal, grant by grant"), _themed_table(rows, [0.22, 0.52, 0.09, 0.17])]
+
+        sc = facts["scenarios"]
+        if sc and "error" not in sc:
+            rows = [["If we assume", "Closure risk without a grant", "Grant cuts the risk by", "Businesses shielded", "Cost per business"]]
+            for name, row in sc["scenarios"].items():
+                cost = f"${row['cost_per_business_shielded_usd']:,}" if row["cost_per_business_shielded_usd"] else "n/a"
+                rows.append([name.title(), f"{100 * row['closure_risk_without_grant']:.0f}%", f"{100 * row['risk_cut_by_grant']:.0f}%",
+                             f"{row['expected_businesses_shielded']:.1f}", cost])
+            block = [_sub(next(numbers), f"What a ${sc['grant_usd']:,} grant changes for {sc['business']}")]
+            if notes.get("scenarios"):
+                block.append(Paragraph(escape(notes["scenarios"]), T_BODY))
+            block += [_themed_table(rows, [0.2, 0.24, 0.2, 0.18, 0.18]), Spacer(1, 5), Paragraph(escape(sc["what_is_assumed"]), T_NOTE)]
+            if sc.get("flip_condition"):
+                block.append(Paragraph(escape(sc["flip_condition"]), T_NOTE))
+            story.append(KeepTogether(block))
 
     if facts["closing"]:
         r = facts["closing"]
-        story += [Paragraph("Employer closure scenario", H2),
-                  Paragraph(f"{r['employer_block']['jobs']:,} workers leave census block {r['employer_block']['block_id']}. "
-                            f"{r['first_order_total']} businesses lose modeled worker demand, and {r['second_order_total']} "
-                            "suppliers behind them are exposed.", BODY)]
+        story.append(KeepTogether([_sub(next(numbers), "Employer closure scenario"),
+                                   Paragraph(f"{r['employer_block']['jobs']:,} workers leave census block {r['employer_block']['block_id']}. "
+                                             f"{r['first_order_total']} businesses lose modeled worker demand, and {r['second_order_total']} "
+                                             "suppliers behind them are exposed.", T_BODY)]))
+
+    # ---- Part 3: evidence ----
+    story += [PageBreak(), Paragraph("03 / EVIDENCE AND ASSUMPTIONS", T_EYEBROW), Paragraph("Make the limits easy to inspect.", T_TITLE),
+              Paragraph("Public records establish context. Modeled relationships support exploration.", T_LEDE)]
     if ev["audit"]:
         need, bias = ev["audit"]["need"], ev["audit"]["structural_bias_in_the_model"]
-        block = [Paragraph("5. Who the neighborhood is", H2)]
+        block = [_sub(next(numbers), "Who the neighborhood is")]
         if notes.get("neighborhood"):
-            block += _body(notes["neighborhood"])
+            block.append(Paragraph(escape(notes["neighborhood"]), T_BODY))
         block += [
             Table([[
-                _bars("Poverty rate", [("Funded tracts", need["funded_avg_tract_poverty"], pct(need["funded_avg_tract_poverty"]), ACCENT),
-                                       ("Corridor", need["corridor_avg_tract_poverty"], pct(need["corridor_avg_tract_poverty"]), SOFT)]),
-                _bars("Households with no vehicle", [("Funded tracts", need["funded_avg_no_vehicle"], pct(need["funded_avg_no_vehicle"]), ACCENT),
-                                                     ("Corridor", need["corridor_avg_no_vehicle"], pct(need["corridor_avg_no_vehicle"]), SOFT)]),
+                _bars("Poverty rate", [("Funded tracts", need["funded_avg_tract_poverty"], pct(need["funded_avg_tract_poverty"]), TEAL),
+                                       ("Corridor", need["corridor_avg_tract_poverty"], pct(need["corridor_avg_tract_poverty"]), GRAY)]),
+                _bars("Households with no vehicle", [("Funded tracts", need["funded_avg_no_vehicle"], pct(need["funded_avg_no_vehicle"]), TEAL),
+                                                     ("Corridor", need["corridor_avg_no_vehicle"], pct(need["corridor_avg_no_vehicle"]), GRAY)]),
             ]], colWidths=[WIDTH / 2] * 2),
             Spacer(1, 6),
             Paragraph(f"A bias in the model: food service is {pct(bias['food_service_share_of_all_businesses'])} of businesses but "
                       f"{pct(bias['food_service_share_of_businesses_with_a_cascade'])} of businesses with any modeled cascade. "
-                      "A business with no modeled links is unseen by the model, not unimportant.", BODY),
+                      "A business with no modeled links is unseen by the model, not unimportant.", T_BODY),
         ]
         story.append(KeepTogether(block))
+    health = analysis.data_health_check()
+    story.append(KeepTogether([
+        _sub(next(numbers), "What supports this memo"),
+        _themed_table([
+            ["Evidence type", "Input", "What it tells us"],
+            ["Public record", f"SF business registry: {health['businesses']} corridor businesses", "Identity, industry and location"],
+            ["Public record", "Census ACS tracts and LEHD workplace blocks", "Neighborhood context and workplace job counts"],
+            ["Public record", f"{health['sba_loans']} matched SBA loans, {health['sba_loans_charged_off']} charged off", "Too few to test the model against real outcomes"],
+            ["Modeled estimate", f"{health['supply_edges']:,} supply links, {health['footfall_edges']:,} worker demand links", "Possible dependencies, not verified invoices or visits"],
+            ["Demo input", f"{len(APPLICANTS)} applicants, ${sum(a['requested_usd'] for a in APPLICANTS):,} requested", "A sample decision scenario, not real applications"],
+        ], [0.2, 0.42, 0.38]),
+        Spacer(1, 5),
+        Paragraph("Checks run on the tables: link keys are unique, no link points at a missing business, and no business supplies itself."
+                  if health["passed"] else "Checks on the tables found problems. Review the data before relying on this memo.", T_NOTE),
+    ]))
     if snapshot.notes_markdown.strip():
-        story.append(Paragraph("Advisor memo", H2))
+        story.append(_sub(next(numbers), "Advisor memo"))
         story.extend(_body(snapshot.notes_markdown))
-    story.append(KeepTogether([Paragraph("6. Evidence and limitations", H2)] + [Paragraph(_inline(item), BULLET, bulletText="•") for item in LIMITS]))
+    story.append(Spacer(1, 10))
+    amber_title = ParagraphStyle("at", fontName="Helvetica-Bold", fontSize=8.5, leading=12, textColor=AMBER, spaceAfter=5)
+    story.append(KeepTogether([_box([
+        Paragraph("REVIEW BEFORE APPROVAL", amber_title),
+        Paragraph("Confirm the supplier relationships, the financial distress and how a grant would help. Reach counts modeled links. "
+                  "It is not a count of businesses saved, and no jobs figure is supported. There is no revenue, rent or distress data. "
+                  "A grant changes a probability, not an outcome.", ParagraphStyle("ab", parent=T_BODY, spaceAfter=0)),
+    ], AMBER_BG, 13)]))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("<b>SOURCES.</b> City of San Francisco registered business locations. Census ACS and LEHD. SBA 7(a) loan records. "
+                           "BEA input output purchase rates for the modeled supply links. Race and ethnicity are never inputs.", T_NOTE))
 
     buffer = io.BytesIO()
-    SimpleDocTemplate(buffer, pagesize=LETTER, leftMargin=inch, rightMargin=inch, topMargin=0.8 * inch, bottomMargin=0.9 * inch,
-                      title=snapshot.title, author="Central Market relief desk").build(story, onFirstPage=_footer, onLaterPages=_footer)
+    SimpleDocTemplate(buffer, pagesize=LETTER, leftMargin=inch, rightMargin=inch, topMargin=1.05 * inch, bottomMargin=1.0 * inch,
+                      title=snapshot.title, author="Central Market relief desk").build(story, onFirstPage=page, onLaterPages=page)
     return buffer.getvalue()
 
 

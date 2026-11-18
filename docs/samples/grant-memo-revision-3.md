@@ -1,6 +1,6 @@
 # Relief funding recommendation
 
-Interactive Grant Memo, revision 3, November 17, 2026.
+Interactive Grant Memo, revision 3, November 18, 2026.
 
 ## 1. Recommendation
 
