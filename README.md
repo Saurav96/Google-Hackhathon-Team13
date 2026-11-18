@@ -152,4 +152,4 @@ notebooks/, data/     the organizers' notebook and federal purchase rate files
 
 ## Team
 
-Add names and lanes here.
+The Titans (SVL 13): Saurav Shaw, Shyam Makwana, Lianghui Yi, Vikas Iyer, Yongzhi Chen.
